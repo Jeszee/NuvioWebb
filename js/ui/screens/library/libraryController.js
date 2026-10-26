@@ -782,17 +782,22 @@ export class LibraryController {
       selectedGenre: null,
       selectedYear: null
     });
-    const selectedTypeKey = validationFacets.availableTypeTabs.some(
-      (item) => item.key === restoredSelection.selectedTypeKey
-    )
-      ? restoredSelection.selectedTypeKey
-      : ALL_KEY;
+    const selectedTypeKey =
+      sourceMode === LibrarySourceMode.SIMKL
+        ? ALL_KEY
+        : validationFacets.availableTypeTabs.some(
+              (item) => item.key === restoredSelection.selectedTypeKey
+            )
+          ? restoredSelection.selectedTypeKey
+          : ALL_KEY;
     const selectedGenre =
+      sourceMode !== LibrarySourceMode.SIMKL &&
       restoredSelection.selectedGenre &&
       validationFacets.availableGenres.some((item) => item.key === restoredSelection.selectedGenre)
         ? restoredSelection.selectedGenre
         : null;
     const selectedYear =
+      sourceMode !== LibrarySourceMode.SIMKL &&
       restoredSelection.selectedYear &&
       validationFacets.availableYears.some((item) => item.key === restoredSelection.selectedYear)
         ? restoredSelection.selectedYear
@@ -951,7 +956,12 @@ export class LibraryController {
       );
     }
     if (this.state.sourceMode === LibrarySourceMode.SIMKL) {
-      return `No ${selectedTypeLabel} in this Simkl status`;
+      const selectedStatus = this.state.listTabs.find(
+        (item) => item.key === this.state.selectedListKey
+      );
+      return selectedStatus
+        ? `No titles in ${selectedStatus.title}`
+        : "No titles in your Simkl library";
     }
     return t("library_empty_local_title", [selectedTypeLabel], `No ${selectedTypeLabel} yet`);
   }
@@ -1243,10 +1253,14 @@ export class LibraryController {
 
   selectList(key) {
     if (Platform.isBrowser() && this.state.sourceMode === LibrarySourceMode.SIMKL) {
-      const selectedListKey = String(key || "").trim() || null;
+      const normalizedKey = String(key || "").trim();
+      const selectedListKey = normalizedKey && normalizedKey !== ALL_KEY ? normalizedKey : null;
       LibraryPreferencesStore.setBrowserSimklStatusKey(selectedListKey);
       this.setState({
         selectedListKey,
+        selectedTypeKey: ALL_KEY,
+        selectedGenre: null,
+        selectedYear: null,
         expandedPicker: null,
         pickerFocusIndex: 0
       });

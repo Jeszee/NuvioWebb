@@ -8880,7 +8880,8 @@ export const SettingsScreen = {
         options: [
           { id: SimklAnimeIdPreference.IMDB, label: "IMDb / TMDB" },
           { id: SimklAnimeIdPreference.MAL, label: "MyAnimeList" },
-          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" }
+          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" },
+          { id: SimklAnimeIdPreference.TVDB, label: "TVDB" }
         ],
         selectedId: settings.simklAnimeIdPreference,
         returnFocusKey: "tracking:desktop:anime",
@@ -8942,7 +8943,7 @@ export const SettingsScreen = {
       ${traktConnected ? this.renderActionRow({ focusKey: "tracking:desktop:cw", title: "Continue Watching window", subtitle: "Trakt history considered for Continue Watching.", value: settings.continueWatchingDaysCap === 0 ? "All history" : `${settings.continueWatchingDaysCap} days` }) : ""}
       ${traktConnected ? this.renderToggleRow({ focusKey: "tracking:desktop:comments", title: "Trakt comments", subtitle: "Show Trakt reviews on metadata pages.", checked: Boolean(settings.showMetaComments) }) : ""}
       ${traktConnected ? this.renderActionRow({ focusKey: "tracking:desktop:related", title: "More Like This source", subtitle: "Choose related titles from Trakt or TMDB.", value: settings.moreLikeThisSource === MoreLikeThisSourcePreference.TMDB ? "TMDB" : "Trakt" }) : ""}
-      ${simklConnected ? this.renderActionRow({ focusKey: "tracking:desktop:anime", title: "Simkl anime ID", subtitle: "Preferred catalog identity for anime matching.", value: settings.simklAnimeIdPreference === SimklAnimeIdPreference.MAL ? "MyAnimeList" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.KITSU ? "Kitsu" : "IMDb / TMDB" }) : ""}
+      ${simklConnected ? this.renderActionRow({ focusKey: "tracking:desktop:anime", title: "Simkl anime ID", subtitle: "Preferred catalog identity for anime matching.", value: settings.simklAnimeIdPreference === SimklAnimeIdPreference.MAL ? "MyAnimeList" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.KITSU ? "Kitsu" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.TVDB ? "TVDB" : "IMDb / TMDB" }) : ""}
     `;
 
     return `

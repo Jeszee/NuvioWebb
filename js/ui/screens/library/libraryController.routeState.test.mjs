@@ -226,6 +226,58 @@ test("LibraryController validates restored genre and year after metadata hydrati
   );
 });
 
+test("Simkl status picker filters Saved items and All clears the status filter", async () => {
+  const statuses = ["watching", "plantowatch", "completed"];
+  const listTabs = statuses.map((status) => ({
+    key: `simkl:status:${status}`,
+    title: status
+  }));
+  const items = statuses.flatMap((status) =>
+    ["movie", "series"].map((type) => ({
+      id: `${status}-${type}`,
+      type,
+      name: `${status} ${type}`,
+      genres: ["Drama"],
+      year: 2024,
+      listKeys: [`simkl:status:${status}`]
+    }))
+  );
+  await withLibraryFixture(
+    { sourceMode: LibrarySourceMode.SIMKL, listTabs, items },
+    async () => {
+      const controller = new LibraryController();
+      try {
+        controller.hydrateFromRouteState({
+          selectedTypeKey: "movie",
+          selectedGenre: "Drama",
+          selectedYear: "2024"
+        });
+        await controller.init();
+        assert.equal(controller.getState().selectedTypeKey, "__all__");
+        assert.equal(controller.getState().selectedGenre, null);
+        assert.equal(controller.getState().selectedYear, null);
+
+        controller.selectList("simkl:status:completed");
+        assert.deepEqual(
+          controller
+            .getState()
+            .visibleItems.map((item) => item.id)
+            .sort(),
+          ["completed-movie", "completed-series"]
+        );
+        assert.equal(controller.getEmptyStateTitle(), "No titles in completed");
+
+        controller.selectList("__all__");
+        assert.equal(controller.getState().selectedListKey, null);
+        assert.equal(controller.getState().visibleItems.length, statuses.length * 2);
+        assert.equal(controller.getSelectedListLabel(), "All");
+      } finally {
+        controller.dispose();
+      }
+    }
+  );
+});
+
 test("LibraryController clears active facets without changing ordinary filter state mechanics", () => {
   const controller = new LibraryController();
   try {

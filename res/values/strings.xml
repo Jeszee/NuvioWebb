@@ -2864,6 +2864,7 @@
     <string name="tracking_simkl_anime_id_imdb">Prefer IMDB</string>
     <string name="tracking_simkl_anime_id_mal">Prefer MyAnimeList</string>
     <string name="tracking_simkl_anime_id_kitsu">Prefer Kitsu</string>
+    <string name="tracking_simkl_anime_id_tvdb">Prefer TVDB</string>
     <string name="tracking_status_connecting">Connecting</string>
     <string name="tracking_finish_connection">Finish connection approval</string>
     <string name="tracking_connecting_provider">Starting %1$s connection…</string>

@@ -854,6 +854,22 @@ export const LibraryScreen = {
         </section>
       `;
     }
+    if (state.sourceMode === "simkl") {
+      return `
+        <section class="library-picker-groups library-saved-picker-groups" id="libraryPickerGroupsMount">
+          <div class="library-picker-row library-saved-picker-row library-primary-filter-row">
+            ${this.renderPicker(
+              "list",
+              "Status",
+              this.controller.getSelectedListLabel(),
+              this.controller.getPickerOptions("list"),
+              "library-picker-flex"
+            )}
+            ${this.renderLibrarySearchButton()}
+          </div>
+        </section>
+      `;
+    }
     const listPickerMarkup =
       state.sourceMode === "trakt" || (Platform.isBrowser() && state.sourceMode === "simkl")
         ? this.renderPicker(

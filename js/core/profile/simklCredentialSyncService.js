@@ -84,6 +84,7 @@ export const SimklCredentialSyncService = {
       try {
         if (!AuthManager.isAuthenticated) return false;
         const resolvedProfileId = resolveProfileId(profileId);
+        if (SimklAuthStore.get(resolvedProfileId).authorizationRevoked) return false;
         const credentials = await SupabaseApi.rpc(
           PULL_RPC,
           { p_profile_id: resolvedProfileId },
@@ -95,6 +96,7 @@ export const SimklCredentialSyncService = {
         const remote = parseCredential(row?.credential_json || row?.credentialJson || null);
         if (!remote) return false;
         const local = SimklAuthStore.get(resolvedProfileId);
+        if (local.authorizationRevoked) return false;
         if (
           local.accessToken === remote.accessToken &&
           local.username === remote.username &&

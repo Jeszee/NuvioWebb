@@ -12,6 +12,7 @@ function normalizeState(value = {}) {
     accessToken: String(value.accessToken || value.access_token || "") || null,
     username: String(value.username || "") || null,
     accountId: value.accountId == null ? null : Number(value.accountId),
+    authorizationRevoked: value.authorizationRevoked === true,
     deviceCode: String(value.deviceCode || value.device_code || "") || null,
     userCode: String(value.userCode || value.user_code || "") || null,
     verificationUrl:
@@ -55,7 +56,8 @@ export const SimklAuthStore = {
   },
 
   isAuthenticated(profileId = activeProfileId()) {
-    return Boolean(readProfileState(profileId).accessToken);
+    const state = readProfileState(profileId);
+    return Boolean(state.accessToken && !state.authorizationRevoked);
   },
 
   saveDeviceSession(data = {}, profileId = activeProfileId()) {
@@ -80,6 +82,7 @@ export const SimklAuthStore = {
     return writeProfileState(profileId, {
       ...current,
       accessToken,
+      authorizationRevoked: false,
       deviceCode: null,
       userCode: null,
       verificationUrl: null,
@@ -107,5 +110,9 @@ export const SimklAuthStore = {
 
   clearAuth(profileId = activeProfileId()) {
     return writeProfileState(profileId, {});
+  },
+
+  markAuthorizationRevoked(profileId = activeProfileId()) {
+    return writeProfileState(profileId, { authorizationRevoked: true });
   }
 };

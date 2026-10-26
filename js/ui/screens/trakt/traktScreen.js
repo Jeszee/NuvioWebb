@@ -384,7 +384,8 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
         options: [
           { id: SimklAnimeIdPreference.IMDB, label: "IMDb / TMDB" },
           { id: SimklAnimeIdPreference.MAL, label: "MyAnimeList" },
-          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" }
+          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" },
+          { id: SimklAnimeIdPreference.TVDB, label: "TVDB" }
         ],
         selectedId: settings.simklAnimeIdPreference,
         returnFocusKey: "tracking:animeId",
@@ -443,7 +444,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
               ${traktConnected ? this.renderActionRow({ focusKey: "tracking:cwWindow", title: t("trakt_continue_watching_window", {}, "Continue Watching window"), subtitle: t("trakt_continue_watching_subtitle", {}, "Trakt history considered for Continue Watching"), value: settings.continueWatchingDaysCap === 0 ? t("trakt_all_history", {}, "All history") : t("trakt_days", [settings.continueWatchingDaysCap], `${settings.continueWatchingDaysCap} days`) }) : ""}
               ${traktConnected ? this.renderToggleRow({ focusKey: "tracking:comments", title: t("trakt_comments_title", {}, "Trakt comments"), subtitle: t("trakt_comments_subtitle", {}, "Show Trakt reviews on metadata pages"), checked: Boolean(settings.showMetaComments) }) : ""}
               ${traktConnected ? this.renderActionRow({ focusKey: "tracking:moreLikeThis", title: t("tracking_more_like_this_source", {}, "More Like This source"), subtitle: t("tracking_more_like_this_source_subtitle", {}, "Choose related titles from Trakt or TMDB"), value: settings.moreLikeThisSource === MoreLikeThisSourcePreference.TMDB ? "TMDB" : "Trakt" }) : ""}
-              ${simklConnected ? this.renderActionRow({ focusKey: "tracking:animeId", title: t("tracking_simkl_anime_id_title", {}, "Simkl anime ID"), subtitle: t("tracking_simkl_anime_id_subtitle", {}, "Preferred catalog identity for anime matching"), value: settings.simklAnimeIdPreference === "mal" ? "MyAnimeList" : settings.simklAnimeIdPreference === "kitsu" ? "Kitsu" : "IMDb / TMDB" }) : ""}
+              ${simklConnected ? this.renderActionRow({ focusKey: "tracking:animeId", title: t("tracking_simkl_anime_id_title", {}, "Simkl anime ID"), subtitle: t("tracking_simkl_anime_id_subtitle", {}, "Preferred catalog identity for anime matching"), value: settings.simklAnimeIdPreference === SimklAnimeIdPreference.MAL ? "MyAnimeList" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.KITSU ? "Kitsu" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.TVDB ? "TVDB" : "IMDb / TMDB" }) : ""}
             </div>
           </div>
           ${simklConnected ? `<p class="settings-trakt-meta-copy settings-tracking-attribution">${escapeHtml(t("licenses_attributions_simkl_body", {}, "Library and tracking data provided by Simkl."))}</p>` : ""}
