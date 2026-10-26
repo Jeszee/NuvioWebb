@@ -8613,7 +8613,7 @@ export const SettingsScreen = {
         this.stopDesktopSimklPolling();
         return;
       }
-      const result = await SimklAuthService.pollPin().catch((error) => ({
+      const result = await SimklAuthService.pollDeviceAuth().catch((error) => ({
         type: "failed",
         message: String(error?.message || error || "Unable to reach Simkl. Try again.")
       }));
@@ -8772,7 +8772,7 @@ export const SettingsScreen = {
     this.actionMap.set("tracking:desktop:simkl:connect", async () => {
       this.desktopSimklErrorMessage = null;
       try {
-        await SimklAuthService.startPinAuth();
+        await SimklAuthService.startDeviceAuth();
         this.desktopSimklStatusMessage = "Waiting for Simkl approval...";
         this.desktopTrackingExpanded = { ...this.desktopTrackingExpanded, simkl: true };
         this.startDesktopSimklPolling();
@@ -8789,7 +8789,7 @@ export const SettingsScreen = {
     });
     this.actionMap.set("tracking:desktop:simkl:cancel", () => {
       this.stopDesktopSimklPolling();
-      SimklAuthService.cancelPinAuth();
+      SimklAuthService.cancelDeviceAuth();
       this.desktopSimklStatusMessage = null;
       this.desktopSimklErrorMessage = null;
     });
@@ -8906,11 +8906,11 @@ export const SettingsScreen = {
       : simklWaiting
         ? `<div class="settings-tracking-activation">
              <div class="settings-row-title">Enter this code on Simkl</div>
-             <p class="settings-row-subtitle">Open Simkl PIN and enter this code to approve Nuvio. This section updates automatically.</p>
+             <p class="settings-row-subtitle">Open the Simkl activation page and enter this code to approve Nuvio. This section updates automatically.</p>
              <code class="settings-tracking-activation-code">${escapeHtml(simkl.userCode || "-")}</code>
              <div class="settings-tracking-activation-url">${escapeHtml(activationUrl)}</div>
              <div class="settings-tracking-inline-actions">
-               ${inlineButton("tracking:desktop:simkl:open", "Open Simkl PIN")}
+               ${inlineButton("tracking:desktop:simkl:open", "Open Simkl activation")}
                ${inlineButton("tracking:desktop:simkl:cancel", "Cancel", "is-secondary")}
              </div>
              <p class="settings-tracking-provider-status">${escapeHtml(this.desktopSimklStatusMessage || "Waiting for Simkl approval...")}</p>

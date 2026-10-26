@@ -165,41 +165,84 @@ export const SimklAuthService = {
     return SimklAuthStore.isAuthenticated();
   },
 
-  async startPinAuth() {
+  async startDeviceAuth() {
     if (!SIMKL_CLIENT_ID) throw new Error("Missing SIMKL_CLIENT_ID");
     const profileId = activeProfileId();
     const current = SimklAuthStore.get(profileId);
-    if (current.userCode && current.expiresAt && Date.now() < current.expiresAt) return current;
-    const { payload } = await simklRequest("/oauth/pin", {
-      authenticated: false
+    if (
+      current.deviceCode &&
+      current.userCode &&
+      current.expiresAt &&
+      Date.now() < current.expiresAt
+    ) {
+      return current;
+    }
+    if (current.userCode && !current.deviceCode) {
+      SimklAuthStore.clearDeviceSession(profileId);
+    }
+    const { payload } = await simklRequest("/oauth2/device", {
+      method: "POST",
+      authenticated: false,
+      body: { client_id: SIMKL_CLIENT_ID }
     });
     if (
-      payload?.result !== "OK" ||
+      !payload?.device_code ||
       !payload?.user_code ||
-      !(payload?.verification_uri || payload?.verification_url) ||
+      !(payload?.verification_url || payload?.verification_uri) ||
       !Number(payload?.expires_in)
     ) {
-      throw new Error("Simkl returned an invalid PIN response");
+      throw new Error("Simkl returned an invalid device authorization response");
     }
-    return SimklAuthStore.savePinSession(payload, profileId);
+    return SimklAuthStore.saveDeviceSession(payload, profileId);
   },
 
-  async pollPin() {
+  async pollDeviceAuth() {
     const profileId = activeProfileId();
     const state = SimklAuthStore.get(profileId);
-    if (!state.userCode) return { type: "invalidated" };
+    if (!state.deviceCode || !state.userCode) return { type: "invalidated" };
     if (state.expiresAt && Date.now() >= state.expiresAt) {
-      SimklAuthStore.clearPinSession(profileId);
+      SimklAuthStore.clearDeviceSession(profileId);
       return { type: "expired" };
     }
-    const { payload } = await simklRequest(`/oauth/pin/${encodeURIComponent(state.userCode)}`, {
-      authenticated: false,
-      retry: false
-    });
-    if (payload?.result === "KO") return { type: "pending" };
+    let payload;
+    try {
+      ({ payload } = await simklRequest("/oauth2/device/token", {
+        method: "POST",
+        authenticated: false,
+        retry: false,
+        body: { client_id: SIMKL_CLIENT_ID, code: state.deviceCode }
+      }));
+    } catch (error) {
+      const oauthError = String(
+        error?.payload?.error || error?.payload?.result || error?.payload?.message || ""
+      ).toLowerCase();
+      if (
+        oauthError === "authorization_pending" ||
+        oauthError === "slow_down" ||
+        oauthError === "ko"
+      ) {
+        return { type: "pending" };
+      }
+      if (
+        oauthError === "expired_token" ||
+        oauthError === "expired" ||
+        oauthError === "invalid_grant"
+      ) {
+        SimklAuthStore.clearDeviceSession(profileId);
+        return { type: "expired" };
+      }
+      throw error;
+    }
+    if (
+      String(payload?.error || "").toLowerCase() === "authorization_pending" ||
+      String(payload?.error || "").toLowerCase() === "slow_down" ||
+      payload?.result === "KO"
+    ) {
+      return { type: "pending" };
+    }
     const accessToken = String(payload?.access_token || "").trim();
-    if (payload?.result !== "OK" || !accessToken || payload?.device_code) {
-      SimklAuthStore.clearPinSession(profileId);
+    if (!accessToken) {
+      SimklAuthStore.clearDeviceSession(profileId);
       return { type: "invalidated" };
     }
     SimklAuthStore.saveToken(accessToken, profileId);
@@ -208,8 +251,8 @@ export const SimklAuthService = {
     return { type: "approved", username };
   },
 
-  cancelPinAuth() {
-    SimklAuthStore.clearPinSession(activeProfileId());
+  cancelDeviceAuth() {
+    SimklAuthStore.clearDeviceSession(activeProfileId());
   },
 
   fetchUserSettings,
