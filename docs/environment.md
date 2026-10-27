@@ -55,6 +55,12 @@ backend.
 | `TV_LOGIN_WEB_BASE_URL`       | Optional | Browser-public            | Empty                                               | Address the television sign-in QR code points at. Empty uses the address the app is served from, which is correct unless the television build is served from somewhere the phone scanning the code cannot reach.     |
 | `TMDB_API_KEY`                | Optional | Browser-public            | Empty                                               | Built-in TMDB key used as a fallback. A key entered in Settings by the person using the app always takes precedence, so this only covers anyone who has not set one. Empty means every user supplies their own.      |
 
+TVDB metadata is separately opt-in under **Settings → Integrations → TVDB**.
+The API key and optional subscriber PIN are profile-scoped credentials entered
+in the app, not Docker environment values. The browser sends them directly to
+TVDB; do not enter a key unless its TVDB account or agreement permits this
+access model. NuvioWeb links to TheTVDB when TVDB metadata is used.
+
 ### Return-to-NuvioWeb notifications (optional)
 
 This optional feature sends a notification after an external player reports

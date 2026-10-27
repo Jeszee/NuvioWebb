@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { continueWatchingEnrichmentSignatureFor } = await import(
-  "./continueWatchingEnrichmentSignature.js"
-);
+const { continueWatchingEnrichmentSignatureFor } =
+  await import("./continueWatchingEnrichmentSignature.js");
 
 const ON = {
   enabled: true,
@@ -27,7 +26,10 @@ test("enrichment that cannot run shares one signature, whatever the reason", () 
 });
 
 test("turning enrichment on changes the signature, so cached entries are re-enriched", () => {
-  const before = continueWatchingEnrichmentSignatureFor({ ...ON, enrichContinueWatching: false }, true);
+  const before = continueWatchingEnrichmentSignatureFor(
+    { ...ON, enrichContinueWatching: false },
+    true
+  );
   const after = continueWatchingEnrichmentSignatureFor(ON, true);
   assert.notEqual(before, after);
 });
@@ -69,10 +71,41 @@ test("settings Continue Watching never consults leave the signature alone", () =
   }
 });
 
+test("changing the preferred metadata addon invalidates cached entries", () => {
+  assert.notEqual(
+    continueWatchingEnrichmentSignatureFor(ON, true, "https://addon-a.example"),
+    continueWatchingEnrichmentSignatureFor(ON, true, "https://addon-b.example")
+  );
+  assert.notEqual(
+    continueWatchingEnrichmentSignatureFor(
+      { ...ON, enabled: false },
+      false,
+      "https://addon-a.example"
+    ),
+    continueWatchingEnrichmentSignatureFor(
+      { ...ON, enabled: false },
+      false,
+      "https://addon-b.example"
+    )
+  );
+});
+
 test("an entry cached before this existed has no signature and counts as stale", () => {
   const cachedEntryWithoutSignature = {};
   assert.notEqual(
     cachedEntryWithoutSignature.enrichmentSignature,
     continueWatchingEnrichmentSignatureFor(ON, true)
+  );
+});
+
+test("enabling TVDB changes Continue Watching cache signatures independently of TMDB", () => {
+  const tvdb = { enabled: true };
+  assert.notEqual(
+    continueWatchingEnrichmentSignatureFor(ON, true, "", tvdb, true),
+    continueWatchingEnrichmentSignatureFor(ON, true, "", { enabled: false }, false)
+  );
+  assert.equal(
+    continueWatchingEnrichmentSignatureFor({ ...ON, enabled: false }, false, "", tvdb, true),
+    "tvdb:v1:on:addon:"
   );
 });

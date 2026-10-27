@@ -9,7 +9,8 @@ globalThis.localStorage = {
   clear: () => values.clear()
 };
 
-const { selectTextlessImagePath } = await import("./tmdbMetadataService.js");
+const { selectBestLocalizedPosterPath, selectTextlessImagePath } =
+  await import("./tmdbMetadataService.js");
 
 // TMDB marks artwork with the language printed on it. No language means no
 // title across the picture, which is the whole point for a hero that draws its
@@ -54,4 +55,25 @@ test("nothing usable reads as nothing, not as a broken path", () => {
   assert.equal(selectTextlessImagePath(null), null);
   assert.equal(selectTextlessImagePath([{ file_path: "/en.jpg", iso_639_1: "en" }]), null);
   assert.equal(selectTextlessImagePath([{ iso_639_1: null, vote_average: 9 }]), null);
+});
+
+test("localized posters are preferred and unrelated-language artwork is ignored", () => {
+  assert.equal(
+    selectBestLocalizedPosterPath(
+      [
+        { file_path: "/japanese.jpg", iso_639_1: "ja", vote_average: 10 },
+        { file_path: "/english.jpg", iso_639_1: "en", vote_average: 5 },
+        { file_path: "/dutch.jpg", iso_639_1: "nl", vote_average: 2 }
+      ],
+      "nl"
+    ),
+    "/dutch.jpg"
+  );
+  assert.equal(
+    selectBestLocalizedPosterPath(
+      [{ file_path: "/japanese.jpg", iso_639_1: "ja", vote_average: 10 }],
+      "en"
+    ),
+    null
+  );
 });

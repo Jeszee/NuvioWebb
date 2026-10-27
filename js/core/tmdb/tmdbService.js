@@ -24,12 +24,32 @@ export const TmdbService = {
       return null;
     }
 
-    const idPart = rawId
-      .replace(/^tmdb:/i, "")
-      .replace(/^movie:/i, "")
-      .replace(/^series:/i, "")
-      .trim();
+    const namespaceMatch = rawId.match(/^([a-z]+):/i);
+    if (namespaceMatch && !/^(tmdb|movie|series|tvdb)$/i.test(namespaceMatch[1])) {
+      return null;
+    }
+
+    const idPart = rawId.replace(/^(tmdb|movie|series|tvdb):/i, "").trim();
     const normalizedIdPart = idPart.split(":")[0]?.split("/")[0]?.trim() || "";
+
+    if (/^tvdb:/i.test(rawId)) {
+      if (!/^\d+$/.test(normalizedIdPart)) {
+        return null;
+      }
+
+      const contentType = getContentType(type);
+      if (contentType !== "tv") {
+        return null;
+      }
+      const url = `${TMDB_BASE_URL}/find/${encodeURIComponent(normalizedIdPart)}?external_source=tvdb_id&api_key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json();
+      const first = Array.isArray(data?.tv_results) ? data.tv_results[0] : null;
+      return first?.id ? String(first.id) : null;
+    }
 
     if (/^\d+$/.test(normalizedIdPart)) {
       return normalizedIdPart;

@@ -81,3 +81,52 @@ client, Stremio addon discovery and playback, responsive layouts, offline-capabl
 PWA behavior, local saved-library support, and the original Trakt/Simkl
 integration surfaces. The entries above describe the work added on top of
 that baseline in this fork.
+
+## 2026-10-27 — Nested session work
+
+### Optional TVDB metadata
+
+- Added an optional built-in TVDB v4 metadata provider for series and
+  episodes.
+- Added profile-scoped TVDB API-key/PIN settings and credential synchronization.
+- Added TVDB metadata enrichment services, tests, attribution, and settings
+  UI.
+- Kept TVDB separate from playback-progress providers: enabling TVDB does not
+  make TVDB the Simkl, Trakt, or Nuvio Sync progress source.
+- Added field-aware fallback ordering: existing catalog/add-on metadata wins,
+  TMDB fills missing fields, and TVDB fills supported fields still missing.
+- Added explicit provider identity candidates for IMDb, TMDB, TVDB, MAL,
+  AniDB, AniList, Kitsu, and Simkl IDs.
+- Added safe ID mapping and season/episode handling without guessing from
+  bare numeric IDs.
+- Documented the direct-browser TVDB deployment choice and the requirement to
+  verify the user's TVDB key/license permissions.
+
+### TMDB and metadata quality
+
+- Added language-aware TMDB fallback for titles and descriptions.
+- Added textless artwork fallback handling.
+- Improved TMDB series/episode enrichment and external-ID resolution.
+- Preserved preferred metadata add-on behavior while allowing provider
+  fallbacks to fill only missing fields.
+- Added metadata provenance/identity tests and attribution updates.
+
+### Home, details, and Continue Watching
+
+- Improved Continue Watching and Up Next identity matching across provider
+  IDs and progress sources.
+- Added duplicate suppression and safer progress cleanup/removal behavior.
+- Improved enrichment signatures and refresh invalidation to avoid stale
+  metadata and duplicate cards.
+- Added title localization and metadata presentation improvements on Home and
+  detail screens.
+- Added layout preference support and corresponding UI/localization strings.
+
+### Nested-session implementation notes
+
+- The detailed TVDB design, API constraints, guardrails, and verification
+  status are retained in
+  [TVDB-METADATA-INTEGRATION-PLAN.md](TVDB-METADATA-INTEGRATION-PLAN.md).
+- These changes were validated with focused metadata, TVDB, profile-sync,
+  Continue Watching, and progress tests, followed by the application build
+  and Docker health checks.

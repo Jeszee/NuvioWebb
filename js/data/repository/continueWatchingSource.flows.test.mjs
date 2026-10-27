@@ -198,6 +198,43 @@ test("a completion recorded while SIMKL owned the row is tagged to SIMKL", async
   assert.equal(record.source, "simkl_local");
 });
 
+test("SIMKL and local playback aliases merge into one metadata-resolvable card", async () => {
+  const device = await freshDevice();
+  signIntoSimkl(device);
+  selectSource(device, device.Source.SIMKL);
+  await device.repo.saveProgress({
+    contentId: "tvdb:81189",
+    contentType: "series",
+    season: 1,
+    episode: 4,
+    positionMs: 30 * 60 * 1000,
+    durationMs: RUNTIME_MS,
+    progressPercent: 25,
+    updatedAt: Date.now()
+  });
+  device.SimklSyncService.getProgressSnapshot = async () => ({
+    historyItems: [],
+    playbackItems: [
+      {
+        contentId: "mal:1234",
+        contentType: "series",
+        ids: { tvdb: "81189", imdb: "tt0903747" },
+        positionMs: 20 * 60 * 1000,
+        durationMs: RUNTIME_MS,
+        progressPercent: 20,
+        source: "simkl_playback",
+        updatedAt: Date.now() - 60_000
+      }
+    ],
+    watchedShowSeedItems: []
+  });
+
+  const items = await device.repo.getRecent(20, { enrichMetadata: false });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].contentId, "tvdb:81189", "newest local progress remains authoritative");
+  assert.equal(items[0].ids.imdb, "tt0903747");
+});
+
 // ---------------------------------------------------------------------------
 // Removing a provider-backed card
 // ---------------------------------------------------------------------------

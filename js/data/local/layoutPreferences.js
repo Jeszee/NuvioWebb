@@ -40,6 +40,7 @@ const DEFAULTS = {
   cardDepthTrailersEnabled: true,
   detailPageTrailerButtonEnabled: true,
   preferExternalMetaAddonDetail: true,
+  preferredMetadataAddonBaseUrl: "",
   blurUnwatchedEpisodes: false,
   collapseSidebar: false,
   // How the browser build draws its primary navigation: a floating bar, or a
@@ -272,6 +273,7 @@ function normalizeLayoutPreferences(value = {}) {
     cardDepthCastEnabled: merged.cardDepthCastEnabled !== false,
     cardDepthTrailersEnabled: merged.cardDepthTrailersEnabled !== false,
     preferExternalMetaAddonDetail: merged.preferExternalMetaAddonDetail !== false,
+    preferredMetadataAddonBaseUrl: String(merged.preferredMetadataAddonBaseUrl || "").trim(),
     showFullReleaseDate: merged.showFullReleaseDate !== false,
     detailPageTrailerButtonEnabled: Boolean(merged.detailPageTrailerButtonEnabled),
     blurUnwatchedEpisodes: Boolean(merged.blurUnwatchedEpisodes),

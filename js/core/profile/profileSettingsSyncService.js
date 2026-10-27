@@ -9,6 +9,7 @@ import { ContinueWatchingPreferences } from "../../data/local/continueWatchingPr
 import { PlayerSettingsStore } from "../../data/local/playerSettingsStore.js";
 import { TmdbSettingsStore } from "../../data/local/tmdbSettingsStore.js";
 import { MdbListSettingsStore } from "../../data/local/mdbListSettingsStore.js";
+import { TvdbSettingsStore } from "../../data/local/tvdbSettingsStore.js";
 import {
   TraktSettingsStore,
   normalizeTraktContinueWatchingDaysCap
@@ -55,6 +56,7 @@ const EXCLUDED_PROFILE_KEYS = {
   layout_settings: new Set(["search_discover_enabled"]),
   player_settings: new Set(["audio_amplification_db", "persist_audio_amplification"]),
   mdblist_settings: new Set(["mdblist_api_key"]),
+  tvdb_settings: new Set(["tvdb_api_key", "tvdb_pin"]),
   debrid_settings: new Set([
     "torbox_api_key",
     "premiumize_api_key",
@@ -1676,6 +1678,29 @@ const FEATURE_ADAPTERS = {
       return true;
     }
   },
+  tvdb_settings: {
+    export(profileId) {
+      return { tvdb_enabled: Boolean(TvdbSettingsStore.getForProfile(profileId).enabled) };
+    },
+    project(rawFeature = {}) {
+      const raw = normalizeFeaturePayload(rawFeature);
+      return booleanOrNull(raw.tvdb_enabled) == null
+        ? {}
+        : { tvdb_enabled: Boolean(raw.tvdb_enabled) };
+    },
+    import(profileId, rawFeature = {}) {
+      const raw = normalizeFeaturePayload(rawFeature);
+      if (booleanOrNull(raw.tvdb_enabled) == null) {
+        return false;
+      }
+      TvdbSettingsStore.setForProfile(
+        profileId,
+        { enabled: Boolean(raw.tvdb_enabled) },
+        { silentSync: true, silentCredentialSync: true }
+      );
+      return true;
+    }
+  },
   trakt_settings: {
     export(profileId) {
       const settings = TraktSettingsStore.getForProfile(profileId);
@@ -2019,6 +2044,7 @@ const PROFILE_SETTINGS_FEATURE_FOR_STORE = Object.freeze({
   trackPreferences: "track_preference",
   tmdbSettings: "tmdb_settings",
   mdbListSettings: "mdblist_settings",
+  tvdbSettings: "tvdb_settings",
   traktSettings: "trakt_settings",
   continueWatchingPreferences: "trakt_settings",
   animeSkipSettings: "animeskip_settings",

@@ -6,6 +6,7 @@ import { DebridSettingsStore } from "../../data/local/debridSettingsStore.js";
 import { MdbListSettingsStore } from "../../data/local/mdbListSettingsStore.js";
 import { AnimeSkipSettingsStore } from "../../data/local/animeSkipSettingsStore.js";
 import { TmdbSettingsStore } from "../../data/local/tmdbSettingsStore.js";
+import { TvdbSettingsStore } from "../../data/local/tvdbSettingsStore.js";
 import { SupabaseApi } from "../../data/remote/supabase/supabaseApi.js";
 import { ProfileManager } from "./profileManager.js";
 import { getSyncClientId } from "../sync/syncClientIdentity.js";
@@ -22,6 +23,7 @@ const CLIENT_ID_FIELD = "client_id";
 const MDBLIST_PROVIDER = "mdblist";
 const ANIMESKIP_PROVIDER = "animeskip";
 const TMDB_PROVIDER = "tmdb";
+const TVDB_PROVIDER = "tvdb";
 
 const pushTimers = new Map();
 let syncInFlight = Promise.resolve();
@@ -65,7 +67,13 @@ function isPending(scope) {
 
 export function buildProviderCredentialSnapshot(
   profileId,
-  { debridSettings = {}, mdbListSettings = {}, animeSkipSettings = {}, tmdbSettings = {} } = {}
+  {
+    debridSettings = {},
+    mdbListSettings = {},
+    animeSkipSettings = {},
+    tmdbSettings = {},
+    tvdbSettings = {}
+  } = {}
 ) {
   const resolvedProfileId = resolveProfileId(profileId);
   return {
@@ -90,6 +98,12 @@ export function buildProviderCredentialSnapshot(
         provider: TMDB_PROVIDER,
         field: API_KEY_FIELD,
         value: String(tmdbSettings.apiKey || "").trim()
+      },
+      {
+        provider: TVDB_PROVIDER,
+        field: API_KEY_FIELD,
+        value: String(tvdbSettings.apiKey || "").trim(),
+        pin: String(tvdbSettings.pin || "").trim()
       }
     ]
   };
@@ -101,11 +115,18 @@ function snapshotFromLocal(profileId) {
     debridSettings: DebridSettingsStore.getForProfile(resolvedProfileId),
     mdbListSettings: MdbListSettingsStore.getForProfile(resolvedProfileId),
     animeSkipSettings: AnimeSkipSettingsStore.getForProfile(resolvedProfileId),
-    tmdbSettings: TmdbSettingsStore.getForProfile(resolvedProfileId)
+    tmdbSettings: TmdbSettingsStore.getForProfile(resolvedProfileId),
+    tvdbSettings: TvdbSettingsStore.getForProfile(resolvedProfileId)
   });
 }
 
 function credentialJson(entry) {
+  if (entry.provider === TVDB_PROVIDER) {
+    return {
+      [entry.field]: String(entry.value || "").trim(),
+      pin: String(entry.pin || "").trim()
+    };
+  }
   return { [entry.field]: String(entry.value || "").trim() };
 }
 
@@ -149,7 +170,13 @@ export function mergeProviderCredentialRows(snapshot, rows = []) {
       if (!payload || typeof payload[local.field] !== "string") {
         throw new Error(`Invalid credential payload for ${local.provider}`);
       }
-      return { ...local, value: payload[local.field].trim() };
+      return {
+        ...local,
+        value: payload[local.field].trim(),
+        ...(local.provider === TVDB_PROVIDER
+          ? { pin: typeof payload.pin === "string" ? payload.pin.trim() : "" }
+          : {})
+      };
     })
   };
 }
@@ -226,6 +253,12 @@ function applySnapshot(snapshot) {
         silentSync: true,
         silentCredentialSync: true
       });
+    } else if (entry.provider === TVDB_PROVIDER) {
+      TvdbSettingsStore.setForProfile(
+        snapshot.profileId,
+        { apiKey: entry.value, pin: entry.pin || "" },
+        { silentSync: true, silentCredentialSync: true }
+      );
     }
   });
 }

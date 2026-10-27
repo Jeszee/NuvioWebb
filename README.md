@@ -50,6 +50,10 @@ strengthens the following functionality:
   confirmation when watched history or ratings are affected.
 - **Trakt:** use the shared library abstraction for watchlists and lists while
   preserving provider-specific list management.
+- **TVDB metadata:** optionally configure a profile-scoped TVDB API key/PIN
+  for series and episode metadata. TVDB is used as a field-aware fallback
+  behind existing catalog/add-on data and TMDB; it does not replace Simkl,
+  Trakt, or Nuvio watch-progress ownership.
 
 ### Consistent title actions
 
@@ -74,6 +78,16 @@ change a list from only a display title or an addon-specific item ID.
   and rate-limit handling.
 - Runtime configuration keeps server-only credentials out of the browser
   bundle.
+- Metadata resolution supports provider identity candidates, preferred
+  metadata add-ons, TMDB language fallback, textless artwork fallback, and
+  optional TVDB enrichment for missing series/episode fields.
+- Continue Watching and Up Next use stronger identity matching, duplicate
+  suppression, progress-source handling, and enrichment invalidation so
+  refreshed metadata does not create duplicate cards or stale progress.
+- Profile settings and provider credentials can be synchronized through the
+  existing profile sync services, including TVDB credentials.
+- Home and detail views include improved title localization, metadata
+  presentation, and layout preferences.
 - Docker and local development proxy configuration are included for the
   provider integrations.
 - Regression tests cover the provider sync flows, library mutations, account

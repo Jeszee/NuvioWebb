@@ -3,7 +3,7 @@ import {
   isWatchProgressCompleted,
   isWatchProgressInProgress
 } from "../../domain/model/watchProgress.js";
-import { watchedItemIdentityValues } from "./watchedIdentity.js";
+import { mergeWatchedItemIdentities, watchedItemIdentityValues } from "./watchedIdentity.js";
 
 export function isSeriesType(type) {
   const normalized = String(type || "").toLowerCase();
@@ -33,32 +33,61 @@ export function shouldTreatAsInProgressForContinueWatching(item = {}) {
  * into a show that happens to share an id in some provider's namespace.
  */
 export function deduplicateContinueWatchingItems(items = []) {
-  const nonSeriesItems = [];
-  const latestSeriesItems = [];
-  const seenSeriesIdentities = new Set();
-  const seenNonSeriesIdentities = new Set();
+  const groups = [];
+  const identityGroups = {
+    movie: new Map(),
+    series: new Map()
+  };
 
   (Array.isArray(items) ? items : [])
     .slice()
     .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))
     .forEach((item) => {
       const isSeries = isSeriesType(item?.contentType);
-      const seenIdentities = isSeries ? seenSeriesIdentities : seenNonSeriesIdentities;
-      const identities = Array.from(watchedItemIdentityValues(item));
-      if (!identities.length || identities.some((identity) => seenIdentities.has(identity))) {
+      const byIdentity = identityGroups[isSeries ? "series" : "movie"];
+      const identities = watchedItemIdentityValues(item);
+      if (!identities.size) {
         return;
       }
-      identities.forEach((identity) => seenIdentities.add(identity));
-      // Eligibility is decided only after the newest record for a title has
-      // won. Checking it first would drop a completed newest record and let an
-      // older partial one resurface, putting a title you already finished back
-      // into Continue Watching beside its real Next Up.
-      if (shouldTreatAsInProgressForContinueWatching(item)) {
-        (isSeries ? latestSeriesItems : nonSeriesItems).push(item);
+
+      const matchingGroups = new Set(
+        Array.from(identities)
+          .map((identity) => byIdentity.get(identity))
+          .filter(Boolean)
+      );
+      let group;
+      if (matchingGroups.size) {
+        group = Array.from(matchingGroups).sort(
+          (left, right) => Number(right.item.updatedAt || 0) - Number(left.item.updatedAt || 0)
+        )[0];
+        group.item = mergeWatchedItemIdentities(group.item, item);
+        matchingGroups.forEach((matchingGroup) => {
+          if (matchingGroup === group) {
+            return;
+          }
+          group.item = mergeWatchedItemIdentities(group.item, matchingGroup.item);
+          matchingGroup.identities.forEach((identity) => {
+            group.identities.add(identity);
+          });
+          const index = groups.indexOf(matchingGroup);
+          if (index >= 0) {
+            groups.splice(index, 1);
+          }
+        });
+      } else {
+        group = {
+          item,
+          identities: new Set()
+        };
+        groups.push(group);
       }
+
+      identities.forEach((identity) => group.identities.add(identity));
+      group.identities.forEach((identity) => byIdentity.set(identity, group));
     });
 
-  return [...nonSeriesItems, ...latestSeriesItems].sort(
-    (left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0)
-  );
+  return groups
+    .filter(({ item }) => shouldTreatAsInProgressForContinueWatching(item))
+    .map(({ item }) => item)
+    .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0));
 }

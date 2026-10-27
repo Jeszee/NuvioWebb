@@ -4,6 +4,7 @@ import { isBrowserOfflineNow } from "../../../core/offline/browserOnlineState.js
 import { subtitleReleaseName } from "../../../domain/model/subtitle.js";
 import { setBrowserMediaTitle } from "../../navigation/browserDocumentTitle.js";
 import { metaRepository } from "../../../data/repository/metaRepository.js";
+import { metadataIdentityCandidatesForItem } from "../../../data/repository/metadataIdentityCandidates.js";
 import { addonRepository } from "../../../data/repository/addonRepository.js";
 import { watchProgressRepository } from "../../../data/repository/watchProgressRepository.js";
 import { savedLibraryRepository } from "../../../data/repository/savedLibraryRepository.js";
@@ -29,6 +30,20 @@ import {
   getEffectiveTmdbApiKey,
   TmdbSettingsStore
 } from "../../../data/local/tmdbSettingsStore.js";
+import {
+  getEffectiveTvdbCredentials,
+  TvdbSettingsStore
+} from "../../../data/local/tvdbSettingsStore.js";
+import {
+  MetadataEnrichmentService,
+  mergeEpisodeEnrichment,
+  mergeMetadataCredits,
+  mergeMetadataLists
+} from "../../../core/tvdb/metadataEnrichmentService.js";
+import {
+  resolveTvdbEpisodeId,
+  resolveTvdbSeriesId
+} from "../../../core/tvdb/tvdbMetadataService.js";
 import { MdbListSettingsStore } from "../../../data/local/mdbListSettingsStore.js";
 import {
   DETAIL_ENRICHMENT_HOLD_MS,
@@ -841,6 +856,20 @@ function renderImdbBadge(rating) {
   `;
 }
 
+function renderTmdbBadge(rating) {
+  const raw = String(rating ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  const value = formatRatingValue(raw, { digits: 1 });
+  return `
+    <span class="series-imdb-badge">
+      <img src="assets/icons/mdblist_tmdb.svg" alt="TMDB" />
+      <span>${value}</span>
+    </span>
+  `;
+}
+
 function renderImdbLogo() {
   return `<img src="assets/icons/imdb_logo_2016.svg" alt="IMDb" onerror="this.hidden=true;this.nextElementSibling.hidden=false" /><span class="detail-imdb-text-fallback" hidden>IMDb</span>`;
 }
@@ -925,15 +954,19 @@ function resolveImdbRating(meta = {}) {
   return null;
 }
 
-function resolveEpisodeImdbRating(episode = {}, seriesRatingsBySeason = {}) {
-  const seasonRating = seriesRatingsBySeason?.[episode.season]?.find(
+function resolveEpisodeRating(episode = {}, seriesRatingsBySeason = {}) {
+  const seasonRatingEntry = seriesRatingsBySeason?.[episode.season]?.find(
     (entry) => Number(entry?.episode || 0) === Number(episode.episode || 0)
-  )?.rating;
-  const normalizedSeasonRating = normalizeEpisodeImdbRating(seasonRating);
+  );
+  const normalizedSeasonRating = normalizeEpisodeImdbRating(seasonRatingEntry?.rating);
   if (normalizedSeasonRating != null) {
-    return normalizedSeasonRating;
+    return {
+      rating: normalizedSeasonRating,
+      source: seasonRatingEntry?.source === "tmdb" ? "tmdb" : "imdb"
+    };
   }
-  return normalizeEpisodeImdbRating(episode?.imdbRating);
+  const episodeRating = normalizeEpisodeImdbRating(episode?.imdbRating);
+  return episodeRating == null ? null : { rating: episodeRating, source: "imdb" };
 }
 
 function formatRuntimeMinutes(runtime) {
@@ -2113,7 +2146,23 @@ export const MetaDetailsScreen = {
     }
 
     const loadMeta = async () => {
-      const globalResultPromise = metaRepository.getMetaFromAllAddons(itemType, itemId);
+      const metadataIds = metadataIdentityCandidatesForItem({
+        contentId: itemId,
+        ids: this.params?.ids,
+        imdbId: this.params?.imdbId,
+        tmdbId: this.params?.tmdbId,
+        tvdbId: this.params?.tvdbId
+      });
+      const globalResultPromise = metaRepository.getMetaFromAllAddonsForIds(itemType, metadataIds);
+      if (LayoutPreferences.get().preferredMetadataAddonBaseUrl) {
+        const preferredResult = await withTimeout(globalResultPromise, 2200, {
+          status: "error",
+          message: "timeout"
+        });
+        if (preferredResult.status === "success") {
+          return preferredResult;
+        }
+      }
       if (sourceAddonBaseUrl && LayoutPreferences.get().preferExternalMetaAddonDetail !== false) {
         const sourceResult = await withTimeout(
           metaRepository.getMeta(sourceAddonBaseUrl, sourceItemType, sourceItemId),
@@ -3372,55 +3421,65 @@ export const MetaDetailsScreen = {
 
   async enrichMeta(meta) {
     const settings = TmdbSettingsStore.get();
-    if (!settings.enabled || !getEffectiveTmdbApiKey() || !meta?.id) {
+    const tvdbSettings = TvdbSettingsStore.get();
+    const tmdbEnabled = settings.enabled && Boolean(getEffectiveTmdbApiKey());
+    const tvdbEnabled = tvdbSettings.enabled && Boolean(getEffectiveTvdbCredentials().apiKey);
+    if ((!tmdbEnabled && !tvdbEnabled) || !meta?.id) {
       return meta;
     }
 
     try {
-      const tmdbId = await TmdbService.ensureTmdbId(meta.id, meta.type);
-      if (!tmdbId) {
-        return meta;
-      }
-      const enrichment = await TmdbMetadataService.fetchEnrichment({
+      const tmdbId = tmdbEnabled ? await TmdbService.ensureTmdbId(meta.id, meta.type) : null;
+      const tvdbId = resolveTvdbSeriesId(meta);
+      const enrichment = await MetadataEnrichmentService.fetchEnrichment({
         tmdbId,
+        tvdbId,
         contentType: meta.type,
-        language: settings.language
+        language: settings.language,
+        existingMetadata: meta
       });
       if (!enrichment) {
         return meta;
       }
       const isSeries = isSeriesDetailMeta(meta, meta?.videos || this.episodes);
-      const episodeMap =
-        settings.useEpisodes && isSeries
-          ? await TmdbMetadataService.fetchEpisodeEnrichment({
+      const episodeResults =
+        isSeries && ((settings.useEpisodes && tmdbEnabled) || tvdbEnabled)
+          ? await MetadataEnrichmentService.fetchEpisodeEnrichment({
               tmdbId,
               seasonNumbers: (Array.isArray(meta.videos) ? meta.videos : [])
                 .map((video) => Number(video?.season || 0))
                 .filter((season) => season > 0),
-              language: settings.language
+              tvdbEpisodeIds: (Array.isArray(meta.videos) ? meta.videos : [])
+                .map(resolveTvdbEpisodeId)
+                .filter(Boolean),
+              episodeMetadata: (Array.isArray(meta.videos) ? meta.videos : []).map((video) => ({
+                ...video,
+                tvdbId: resolveTvdbEpisodeId(video)
+              })),
+              language: settings.language,
+              originalLanguage: enrichment.originalLanguage
             })
-          : new Map();
+          : { tmdbEpisodes: new Map(), tvdbEpisodes: new Map() };
       const videos =
-        episodeMap.size && Array.isArray(meta.videos)
+        (episodeResults.tmdbEpisodes.size || episodeResults.tvdbEpisodes.size) &&
+        Array.isArray(meta.videos)
           ? meta.videos.map((video) => {
               const key =
                 Number(video?.season || 0) > 0 && Number(video?.episode || 0) > 0
                   ? `${Number(video.season)}:${Number(video.episode)}`
                   : "";
-              const episode = key ? episodeMap.get(key) : null;
-              if (!episode) {
+              const tvdbEpisodeId = resolveTvdbEpisodeId(video);
+              const tvdbEpisode =
+                (tvdbEpisodeId && episodeResults.tvdbEpisodes.get(`tvdb:${tvdbEpisodeId}`)) || null;
+              const tmdbEpisode = (key && episodeResults.tmdbEpisodes.get(key)) || null;
+              if (!tvdbEpisode && !tmdbEpisode) {
                 return video;
               }
-              return {
-                ...video,
-                title: episode.title || video.title,
-                overview: episode.overview || video.overview,
-                released: settings.useReleaseDates
-                  ? episode.airDate || video.released
-                  : video.released,
-                thumbnail: episode.thumbnail || video.thumbnail,
-                runtime: episode.runtime || video.runtime
-              };
+              return mergeEpisodeEnrichment(video, {
+                tvdbEpisode,
+                tmdbEpisode,
+                useReleaseDates: settings.useReleaseDates
+              });
             })
           : meta.videos;
 
@@ -3434,14 +3493,32 @@ export const MetaDetailsScreen = {
         });
       }
 
+      const preservePreferredAddon = Boolean(
+        String(LayoutPreferences.get().preferredMetadataAddonBaseUrl || "").trim()
+      );
+      const preserveExistingMetadata = preservePreferredAddon || tvdbEnabled;
       return {
         ...meta,
-        name: settings.useBasicInfo ? enrichment.localizedTitle || meta.name : meta.name,
+        name: settings.useBasicInfo
+          ? preserveExistingMetadata
+            ? meta.name || enrichment.localizedTitle
+            : enrichment.localizedTitle || meta.name
+          : meta.name,
         description: settings.useBasicInfo
-          ? enrichment.description || meta.description
+          ? preserveExistingMetadata
+            ? meta.description || enrichment.description
+            : enrichment.description || meta.description
           : meta.description,
-        background: settings.useArtwork ? enrichment.backdrop || meta.background : meta.background,
-        poster: settings.useArtwork ? enrichment.poster || meta.poster : meta.poster,
+        background: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.background || enrichment.backdrop
+            : enrichment.backdrop || meta.background
+          : meta.background,
+        poster: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.poster || enrichment.poster
+            : enrichment.poster || meta.poster
+          : meta.poster,
         // The plates for the hero, which chooses between them by screen shape.
         // Also written to the shared cache, so Home opens this title correctly
         // the next time it comes round in the rotation.
@@ -3449,45 +3526,78 @@ export const MetaDetailsScreen = {
         textlessPoster: settings.useArtwork ? enrichment.textlessPoster || null : null,
         // TMDB enrichment deliberately returns no logo when only unrelated
         // languages are available; show the localized text title in that case.
-        logo: settings.useArtwork ? enrichment.logo : meta.logo,
+        logo: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.logo || enrichment.logo
+            : enrichment.logo || meta.logo
+          : meta.logo,
         genres: settings.useBasicInfo
-          ? mergeGenreLists(meta.genres, enrichment.genres)
+          ? preserveExistingMetadata
+            ? mergeGenreLists(meta.genres, enrichment.genres)
+            : enrichment.genres?.length
+              ? enrichment.genres
+              : meta.genres
           : meta.genres,
         releaseInfo: settings.useReleaseDates
-          ? meta.releaseInfo || enrichment.releaseInfo
+          ? preserveExistingMetadata
+            ? meta.releaseInfo || enrichment.releaseInfo
+            : enrichment.releaseInfo || meta.releaseInfo
           : meta.releaseInfo,
         released: settings.useReleaseDates
-          ? meta.released || meta.releaseDate || meta.release_date || enrichment.released || null
+          ? preserveExistingMetadata
+            ? meta.released || meta.releaseDate || meta.release_date || enrichment.released || null
+            : enrichment.released || meta.released || meta.releaseDate || meta.release_date || null
           : meta.released || meta.releaseDate || meta.release_date || null,
-        runtime: settings.useDetails ? enrichment.runtime || meta.runtime : meta.runtime,
-        country: settings.useDetails ? enrichment.country || meta.country : meta.country,
-        language: settings.useDetails ? enrichment.language || meta.language : meta.language,
+        runtime: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.runtime || enrichment.runtime
+            : enrichment.runtime || meta.runtime
+          : meta.runtime,
+        country: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.country || enrichment.country
+            : enrichment.country || meta.country
+          : meta.country,
+        language: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.language || enrichment.language
+            : enrichment.language || meta.language
+          : meta.language,
         originalLanguage:
-          enrichment.originalLanguage || meta.originalLanguage || meta.original_language || null,
-        imdbId: enrichment.imdbId || meta.imdbId || meta.imdb_id || null,
+          (preserveExistingMetadata
+            ? meta.originalLanguage || meta.original_language || enrichment.originalLanguage
+            : enrichment.originalLanguage || meta.originalLanguage || meta.original_language) ||
+          null,
+        imdbId:
+          (preserveExistingMetadata
+            ? meta.imdbId || meta.imdb_id || enrichment.imdbId
+            : enrichment.imdbId || meta.imdbId || meta.imdb_id) || null,
         tmdbRating:
           settings.useBasicInfo && typeof enrichment.rating === "number"
             ? Number(enrichment.rating.toFixed(1))
             : meta.tmdbRating || null,
+        tvdbScore: enrichment.tvdbScore ?? meta.tvdbScore ?? null,
+        tvdbId: enrichment.tvdbId || meta.tvdbId || null,
+        tvdbMetadataSource: Boolean(enrichment.attributionUrl || meta.tvdbMetadataSource),
         credits: settings.useCredits
-          ? enrichment.credits || meta.credits || null
+          ? mergeMetadataCredits(meta.credits, enrichment.credits)
           : meta.credits || null,
-        companies:
-          settings.useProductions && Array.isArray(enrichment.companies)
-            ? enrichment.companies
-            : meta.companies || [],
-        productionCompanies:
-          settings.useProductions && Array.isArray(enrichment.productionCompanies)
-            ? enrichment.productionCompanies
-            : Array.isArray(meta.productionCompanies)
-              ? meta.productionCompanies
-              : [],
-        networks:
-          settings.useNetworks && Array.isArray(enrichment.networks)
-            ? enrichment.networks
-            : Array.isArray(meta.networks)
-              ? meta.networks
-              : [],
+        companies: settings.useProductions
+          ? mergeMetadataLists(meta.companies, enrichment.companies)
+          : meta.companies || [],
+        productionCompanies: settings.useProductions
+          ? mergeMetadataLists(
+              meta.productionCompanies || meta.production_companies,
+              enrichment.productionCompanies
+            )
+          : Array.isArray(meta.productionCompanies)
+            ? meta.productionCompanies
+            : [],
+        networks: settings.useNetworks
+          ? mergeMetadataLists(meta.networks, enrichment.networks)
+          : Array.isArray(meta.networks)
+            ? meta.networks
+            : [],
         trailers:
           Array.isArray(meta.trailers) && meta.trailers.length
             ? meta.trailers
@@ -3591,7 +3701,28 @@ export const MetaDetailsScreen = {
       if (!imdbId && !tmdbId) {
         return {};
       }
-      return await imdbEpisodeRatingsRepository.getEpisodeRatings({ imdbId, tmdbId });
+      const [providedRatings, tmdbRatings] = await Promise.all([
+        imdbEpisodeRatingsRepository.getEpisodeRatings({ imdbId, tmdbId }),
+        tmdbId
+          ? TmdbMetadataService.fetchEpisodeRatings({
+              tmdbId,
+              seasonNumbers: [...new Set(this.episodes.map((episode) => Number(episode.season)))]
+            })
+          : {}
+      ]);
+      const mergedRatings = { ...(tmdbRatings || {}) };
+      Object.entries(providedRatings || {}).forEach(([season, episodes]) => {
+        const ratingsByEpisode = new Map(
+          (mergedRatings[season] || []).map((entry) => [Number(entry.episode), entry])
+        );
+        (Array.isArray(episodes) ? episodes : []).forEach((entry) => {
+          ratingsByEpisode.set(Number(entry.episode), entry);
+        });
+        mergedRatings[season] = [...ratingsByEpisode.values()].sort(
+          (left, right) => left.episode - right.episode
+        );
+      });
+      return mergedRatings;
     } catch (error) {
       console.warn("Series ratings enrichment failed", error);
       return {};
@@ -4456,9 +4587,13 @@ export const MetaDetailsScreen = {
     // It moves below the artwork instead. A mouse keeps the cinema framing, and
     // TV keeps the single collapsible body its trailer transition animates.
     const heroMetaBelowArtwork = detailUsesTouchLayout();
+    const tvdbAttribution = meta.tvdbMetadataSource
+      ? `<p class="series-detail-support"><a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer">Metadata by TheTVDB</a></p>`
+      : "";
     const heroMeta = `
       ${this.renderResumeIndicator()}
       ${creditLine ? `<p class="series-detail-support">${escapeHtml(creditPrefix)}: ${escapeHtml(creditLine)}</p>` : ""}
+      ${tvdbAttribution}
       ${externalRatings}
       ${
         heroMetaBelowArtwork
@@ -4655,6 +4790,7 @@ export const MetaDetailsScreen = {
       <div class="row">
         <h2>${meta.name || "Untitled"}</h2>
         <p>${meta.description || t("detail.noDescription", {}, "No description.")}</p>
+        ${meta.tvdbMetadataSource ? '<p><a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer">Metadata by TheTVDB</a></p>' : ""}
         <p style="opacity:0.8;">Type: ${meta.type || "unknown"} | Id: ${meta.id || "-"}</p>
       </div>
       <div class="row">
@@ -6103,7 +6239,11 @@ export const MetaDetailsScreen = {
       ? Boolean(this.enrichedWatchedState.get(episodeKey)?.isWatched)
       : this.watchedEpisodeKeys.has(episodeKey);
     const shouldBlur = Boolean(LayoutPreferences.get().blurUnwatchedEpisodes) && !isWatched;
-    const rating = resolveEpisodeImdbRating(episode, this.seriesRatingsBySeason);
+    const episodeRating = resolveEpisodeRating(episode, this.seriesRatingsBySeason);
+    const ratingBadge =
+      episodeRating?.source === "tmdb"
+        ? renderTmdbBadge(episodeRating.rating)
+        : renderImdbBadge(episodeRating?.rating);
     const dateLabel = formatEpisodeCardDate(episode.released || "");
     const isUnavailable = episode.available === false;
     const offlineEpisodeMediaId = createOfflineMediaId({
@@ -6118,9 +6258,7 @@ export const MetaDetailsScreen = {
     );
     const metaParts = [
       episode.runtimeMinutes > 0 ? renderEpisodeRuntimeLabel(episode.runtimeMinutes) : "",
-      rating != null
-        ? `<span class="series-episode-rating-inline">${renderImdbBadge(String(Number(rating).toFixed(1)))}</span>`
-        : "",
+      ratingBadge ? `<span class="series-episode-rating-inline">${ratingBadge}</span>` : "",
       dateLabel ? `<span class="series-episode-date">${escapeHtml(dateLabel)}</span>` : ""
     ]
       .filter(Boolean)

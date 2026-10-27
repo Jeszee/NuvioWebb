@@ -7,6 +7,14 @@
 // Continue Watching cards. Callers must compare these sets instead.
 const ID_NAMESPACES = ["tmdb", "trakt", "tvdb", "mal", "anidb", "anilist", "kitsu", "simkl"];
 
+function itemIds(item = {}) {
+  return {
+    ...(item.externalIds && typeof item.externalIds === "object" ? item.externalIds : {}),
+    ...(item.external_ids && typeof item.external_ids === "object" ? item.external_ids : {}),
+    ...(item.ids && typeof item.ids === "object" ? item.ids : {})
+  };
+}
+
 // A missing id is often carried as 0 or "0" rather than absent. Left in, every
 // such item would share the identity `tmdb:0` and collapse into a single card.
 function isDegenerateIdentity(value) {
@@ -26,6 +34,46 @@ function addIdentityValue(set, value) {
   set.add(normalized.toLowerCase());
 }
 
+export function mergeWatchedItemIdentities(preferred = {}, supplemental = {}) {
+  const preferredIds = itemIds(preferred);
+  const supplementalIds = itemIds(supplemental);
+  const ids = { ...supplementalIds, ...preferredIds };
+
+  ID_NAMESPACES.forEach((namespace) => {
+    const preferredValue =
+      preferred[`${namespace}Id`] ?? preferred[`${namespace}_id`] ?? preferredIds[namespace];
+    const supplementalValue =
+      supplemental[`${namespace}Id`] ??
+      supplemental[`${namespace}_id`] ??
+      supplementalIds[namespace];
+    if (!isDegenerateIdentity(preferredValue) && preferredValue != null) {
+      ids[namespace] = preferredValue;
+    } else if (!isDegenerateIdentity(supplementalValue) && supplementalValue != null) {
+      ids[namespace] = supplementalValue;
+    } else {
+      delete ids[namespace];
+    }
+  });
+
+  const preferredImdbId = preferred.imdbId ?? preferred.imdb_id ?? preferredIds.imdb;
+  const supplementalImdbId = supplemental.imdbId ?? supplemental.imdb_id ?? supplementalIds.imdb;
+  const imdbId =
+    !isDegenerateIdentity(preferredImdbId) && preferredImdbId != null
+      ? preferredImdbId
+      : supplementalImdbId;
+  if (imdbId != null && !isDegenerateIdentity(imdbId)) {
+    ids.imdb = imdbId;
+  } else {
+    delete ids.imdb;
+  }
+
+  return {
+    ...preferred,
+    imdbId: imdbId != null && !isDegenerateIdentity(imdbId) ? imdbId : null,
+    ids
+  };
+}
+
 function addPrefixedIdentityValue(set, prefix, value) {
   const normalized = String(value ?? "")
     .trim()
@@ -38,7 +86,7 @@ function addPrefixedIdentityValue(set, prefix, value) {
 
 export function watchedItemIdentityValues(item = {}) {
   const values = new Set();
-  const ids = item.ids || item.externalIds || item.external_ids || {};
+  const ids = itemIds(item);
 
   addIdentityValue(values, item.contentId);
   addIdentityValue(values, item.id);
