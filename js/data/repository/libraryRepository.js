@@ -8,11 +8,14 @@ import { requestJson, TraktAuthService } from "./traktAuthService.js";
 import { TraktLibrarySourceMode, TraktSettingsStore } from "../local/traktSettingsStore.js";
 import { SimklAuthService } from "./simklAuthService.js";
 import { SimklSyncService } from "./simklSyncService.js";
+import { MdbListAccount } from "./mdbListAccount.js";
+import { MdbListLibraryService } from "./mdbListLibraryService.js";
 
 export const LibrarySourceMode = {
   LOCAL: "local",
   TRAKT: "trakt",
-  SIMKL: "simkl"
+  SIMKL: "simkl",
+  MDBLIST: "mdblist"
 };
 
 export const LibrarySortOptionKey = {
@@ -689,9 +692,10 @@ class LibraryRepository {
   async getSourceMode() {
     const selectedMode = TraktSettingsStore.get().librarySourceMode;
     if (selectedMode === TraktLibrarySourceMode.SIMKL) {
-      return SimklAuthService.isAuthenticated()
-        ? LibrarySourceMode.SIMKL
-        : LibrarySourceMode.LOCAL;
+      return SimklAuthService.isAuthenticated() ? LibrarySourceMode.SIMKL : LibrarySourceMode.LOCAL;
+    }
+    if (selectedMode === TraktLibrarySourceMode.MDBLIST) {
+      return MdbListAccount.isAuthenticated() ? LibrarySourceMode.MDBLIST : LibrarySourceMode.LOCAL;
     }
     if (selectedMode !== TraktLibrarySourceMode.TRAKT) {
       return LibrarySourceMode.LOCAL;
@@ -708,6 +712,9 @@ class LibraryRepository {
     if (SimklAuthService.isAuthenticated()) {
       sourceModes.push(LibrarySourceMode.SIMKL);
     }
+    if (MdbListAccount.isAuthenticated()) {
+      sourceModes.push(LibrarySourceMode.MDBLIST);
+    }
     if (await TraktAuthService.getValidAccessToken().catch(() => null)) {
       sourceModes.push(LibrarySourceMode.TRAKT);
     }
@@ -721,6 +728,9 @@ class LibraryRepository {
     }
     if (resolvedSourceMode === LibrarySourceMode.SIMKL) {
       return SimklSyncService.getLibraryTabs();
+    }
+    if (resolvedSourceMode === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.getTabs();
     }
     await this.ensureFreshTraktState();
     const personalTabs = await getRemotePersonalTabs();
@@ -749,6 +759,10 @@ class LibraryRepository {
       const entries = await SimklSyncService.getLibraryEntries();
       return hydrate ? hydrateEntries(entries) : entries;
     }
+    if (resolvedSourceMode === LibrarySourceMode.MDBLIST) {
+      const entries = await MdbListLibraryService.getEntries();
+      return hydrate ? hydrateEntries(entries) : entries;
+    }
     return resolvedSourceMode === LibrarySourceMode.TRAKT
       ? getRemoteEntries({ hydrate })
       : getLocalEntries({ hydrate });
@@ -766,6 +780,9 @@ class LibraryRepository {
     }
     if (resolvedSourceMode === LibrarySourceMode.SIMKL) {
       return SimklSyncService.getMembershipSnapshot(item);
+    }
+    if (resolvedSourceMode === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.getMembershipSnapshot(item);
     }
     const [entries, listTabs] = await Promise.all([
       this.getItems({ sourceMode: resolvedSourceMode }),
@@ -787,6 +804,10 @@ class LibraryRepository {
     }
     if (resolvedSourceMode === LibrarySourceMode.SIMKL) {
       await SimklSyncService.applyMembershipChanges(item, changes, options);
+      return;
+    }
+    if (resolvedSourceMode === LibrarySourceMode.MDBLIST) {
+      await MdbListLibraryService.applyMembershipChanges(item, changes);
       return;
     }
 
@@ -853,6 +874,9 @@ class LibraryRepository {
   }
 
   async createPersonalList(name, description, privacy) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.createPersonalList(name, description, privacy);
+    }
     const { payload } = await authorizedTraktRequest("/users/me/lists", {
       method: "POST",
       body: {
@@ -874,6 +898,9 @@ class LibraryRepository {
   }
 
   async updatePersonalList(listId, name, description, privacy) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.updatePersonalList(listId, name, description, privacy);
+    }
     const { payload } = await authorizedTraktRequest(
       `/users/me/lists/${encodeURIComponent(String(listId))}`,
       {
@@ -907,6 +934,9 @@ class LibraryRepository {
   }
 
   async deletePersonalList(listId) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.deletePersonalList(listId);
+    }
     await authorizedTraktRequest(`/users/me/lists/${encodeURIComponent(String(listId))}`, {
       method: "DELETE",
       errorMessage: "Could not delete Trakt list"
@@ -926,6 +956,9 @@ class LibraryRepository {
   }
 
   async reorderPersonalLists(orderedListIds = []) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.reorderPersonalLists(orderedListIds);
+    }
     const rank = orderedListIds
       .map((id) => Number(String(id).replace(PERSONAL_KEY_PREFIX, "")))
       .filter((id) => Number.isFinite(id) && id > 0);
@@ -973,6 +1006,14 @@ class LibraryRepository {
         return true;
       } catch (error) {
         console.warn("[LIB] Trakt library fetch failed", error);
+        return false;
+      }
+    }
+    if (sourceMode === LibrarySourceMode.MDBLIST) {
+      try {
+        return await MdbListLibraryService.refreshNow();
+      } catch (error) {
+        console.warn("[LIB] MDBList library fetch failed", error);
         return false;
       }
     }

@@ -7,9 +7,9 @@ import { LocalStore } from "../../core/storage/localStore.js";
 
 const DEFAULT_API_URL = "https://api.simkl.com";
 const MAX_ATTEMPTS = 5;
-const REQUEST_INTERVAL_MS = 1000;
+const REQUEST_INTERVAL_MS = 2000;
 const RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
-const RATE_STATE_KEY = "simklRequestRateState";
+const RATE_STATE_KEY_PREFIX = "simklRequestRateState";
 const DEVICE_POLL_STATE_KEY = "simklDevicePollState";
 let requestQueue = Promise.resolve();
 
@@ -25,15 +25,20 @@ function apiBaseUrl() {
   return String(SIMKL_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
 }
 
+function rateStateKey() {
+  return `${RATE_STATE_KEY_PREFIX}:${SIMKL_CLIENT_ID || "unconfigured"}`;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function rateLimitedFetch(url, options, { allowDuringCooldown = false } = {}) {
+async function rateLimitedFetch(url, options) {
   const request = async () => {
-    const state = LocalStore.get(RATE_STATE_KEY, {});
+    const stateKey = rateStateKey();
+    const state = LocalStore.get(stateKey, {});
     const now = Date.now();
-    if (!allowDuringCooldown && Number(state.cooldownUntil) > now) {
+    if (Number(state.cooldownUntil) > now) {
       const error = new Error("Simkl is rate limiting requests. Please try again later.");
       error.status = 429;
       error.retryAfter = Number(state.cooldownUntil) - now;
@@ -53,13 +58,13 @@ async function rateLimitedFetch(url, options, { allowDuringCooldown = false } = 
           Number(state.cooldownUntil) || 0,
           completedAt + (retryAfter || RATE_LIMIT_COOLDOWN_MS)
         );
-      } else if (!allowDuringCooldown && Number(state.cooldownUntil) > completedAt) {
+      } else if (Number(state.cooldownUntil) > completedAt) {
         nextState.cooldownUntil = state.cooldownUntil;
       }
-      LocalStore.set(RATE_STATE_KEY, nextState);
+      LocalStore.set(stateKey, nextState);
       return response;
     } catch (error) {
-      LocalStore.set(RATE_STATE_KEY, { lastRequestAt: Date.now() });
+      LocalStore.set(stateKey, { ...state, lastRequestAt: Date.now() });
       throw error;
     }
   };
@@ -136,25 +141,21 @@ async function executeSimklRequest(
     }
     let response;
     try {
-      response = await rateLimitedFetch(
-        url.toString(),
-        {
-          method,
-          headers,
-          body:
-            body == null
-              ? undefined
-              : formEncoded
-                ? new URLSearchParams(body).toString()
-                : JSON.stringify(body),
-          // A scrobble is usually written while the page is going away -- the tab
-          // is closing, or the app is being backgrounded -- and an ordinary fetch
-          // is cancelled with the document. Payloads here are far below the 64KB
-          // keepalive limit.
-          keepalive: body != null
-        },
-        { allowDuringCooldown: path === "/oauth2/device" || path === "/oauth2/token" }
-      );
+      response = await rateLimitedFetch(url.toString(), {
+        method,
+        headers,
+        body:
+          body == null
+            ? undefined
+            : formEncoded
+              ? new URLSearchParams(body).toString()
+              : JSON.stringify(body),
+        // A scrobble is usually written while the page is going away -- the tab
+        // is closing, or the app is being backgrounded -- and an ordinary fetch
+        // is cancelled with the document. Payloads here are far below the 64KB
+        // keepalive limit.
+        keepalive: body != null
+      });
     } catch (error) {
       if (error?.status === 429) throw error;
       if (attempt + 1 >= attempts) throw error;
@@ -232,12 +233,13 @@ export const SimklAuthService = {
     if (
       current.deviceCode &&
       current.userCode &&
+      current.deviceClientId === SIMKL_CLIENT_ID &&
       current.expiresAt &&
       Date.now() < current.expiresAt
     ) {
       return current;
     }
-    if (current.userCode && !current.deviceCode) {
+    if (current.deviceCode || current.userCode) {
       SimklAuthStore.clearDeviceSession(profileId);
     }
     const { payload } = await simklRequest("/oauth2/device", {
@@ -254,7 +256,10 @@ export const SimklAuthService = {
     ) {
       throw new Error("Simkl returned an invalid device authorization response");
     }
-    const state = SimklAuthStore.saveDeviceSession(payload, profileId);
+    const state = SimklAuthStore.saveDeviceSession(
+      { ...payload, clientId: SIMKL_CLIENT_ID },
+      profileId
+    );
     LocalStore.remove(`${DEVICE_POLL_STATE_KEY}:${profileId}`);
     return state;
   },
@@ -267,6 +272,11 @@ export const SimklAuthService = {
         return state.accessToken
           ? { type: "approved", username: state.username }
           : { type: "invalidated" };
+      }
+      if (state.deviceClientId !== SIMKL_CLIENT_ID) {
+        SimklAuthStore.clearDeviceSession(profileId);
+        LocalStore.remove(`${DEVICE_POLL_STATE_KEY}:${profileId}`);
+        return { type: "invalidated" };
       }
       if (state.expiresAt && Date.now() >= state.expiresAt) {
         SimklAuthStore.clearDeviceSession(profileId);
@@ -296,11 +306,11 @@ export const SimklAuthService = {
         const oauthError = String(
           error?.payload?.error || error?.payload?.result || error?.payload?.message || ""
         ).toLowerCase();
-        if (
-          oauthError === "authorization_pending" ||
-          oauthError === "slow_down" ||
-          oauthError === "ko"
-        ) {
+        if (oauthError === "slow_down") {
+          SimklAuthStore.setPollInterval(state.pollInterval + 5, profileId);
+          return { type: "pending" };
+        }
+        if (oauthError === "authorization_pending" || oauthError === "ko") {
           return { type: "pending" };
         }
         if (
@@ -314,9 +324,12 @@ export const SimklAuthService = {
         }
         throw error;
       }
+      if (String(payload?.error || "").toLowerCase() === "slow_down") {
+        SimklAuthStore.setPollInterval(state.pollInterval + 5, profileId);
+        return { type: "pending" };
+      }
       if (
         String(payload?.error || "").toLowerCase() === "authorization_pending" ||
-        String(payload?.error || "").toLowerCase() === "slow_down" ||
         payload?.result === "KO"
       ) {
         return { type: "pending" };

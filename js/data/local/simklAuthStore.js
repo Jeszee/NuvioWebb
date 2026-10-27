@@ -14,6 +14,7 @@ function normalizeState(value = {}) {
     accountId: value.accountId == null ? null : Number(value.accountId),
     authorizationRevoked: value.authorizationRevoked === true,
     deviceCode: String(value.deviceCode || value.device_code || "") || null,
+    deviceClientId: String(value.deviceClientId || value.clientId || "") || null,
     userCode: String(value.userCode || value.user_code || "") || null,
     verificationUrl:
       String(value.verificationUrl || value.verification_uri || value.verification_url || "") ||
@@ -66,6 +67,7 @@ export const SimklAuthStore = {
     return writeProfileState(profileId, {
       ...current,
       deviceCode: data.device_code || data.deviceCode || null,
+      deviceClientId: data.clientId || data.deviceClientId || null,
       userCode: data.user_code || data.userCode || null,
       verificationUrl:
         data.verification_url ||
@@ -84,6 +86,7 @@ export const SimklAuthStore = {
       accessToken,
       authorizationRevoked: false,
       deviceCode: null,
+      deviceClientId: null,
       userCode: null,
       verificationUrl: null,
       expiresAt: null,
@@ -101,6 +104,7 @@ export const SimklAuthStore = {
     return writeProfileState(profileId, {
       ...current,
       deviceCode: null,
+      deviceClientId: null,
       userCode: null,
       verificationUrl: null,
       expiresAt: null,
@@ -108,11 +112,24 @@ export const SimklAuthStore = {
     });
   },
 
+  setPollInterval(interval, profileId = activeProfileId()) {
+    const current = readProfileState(profileId);
+    return writeProfileState(profileId, {
+      ...current,
+      pollInterval: Math.max(1, Number(interval) || current.pollInterval)
+    });
+  },
+
   clearAuth(profileId = activeProfileId()) {
-    return writeProfileState(profileId, {});
+    return writeProfileState(profileId, { authorizationRevoked: true });
   },
 
   markAuthorizationRevoked(profileId = activeProfileId()) {
-    return writeProfileState(profileId, { authorizationRevoked: true });
+    const current = readProfileState(profileId);
+    return writeProfileState(profileId, {
+      ...current,
+      accessToken: null,
+      authorizationRevoked: true
+    });
   }
 };

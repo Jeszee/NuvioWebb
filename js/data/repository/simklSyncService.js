@@ -7,14 +7,16 @@ import { simklRequest, withBrowserLock } from "./simklAuthService.js";
 const STORE_KEY = "simklSyncState";
 const SNAPSHOT_SCHEMA_VERSION = 3;
 const AUTOMATIC_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const FORCED_REFRESH_INTERVAL_MS = 15 * 1000;
 // Continue Watching is user-facing: opening Home or returning to it should be
 // able to pick up progress recorded on another device. Fifteen minutes is fine
 // for background upkeep but made NuvioWeb look like it had stopped syncing, so
 // a CW resolve is allowed to re-check far sooner while still being debounced
 // enough that ordinary navigation cannot hammer the API.
 const CONTINUE_WATCHING_REFRESH_INTERVAL_MS = 60 * 1000;
-const EXTENDED_QUERY =
-  "extended=full_anime_seasons&episode_watched_at=yes&episode_tvdb_id=yes&include_all_episodes=yes&language=en";
+const EPISODE_QUERY =
+  "extended=full&episode_watched_at=yes&include_all_episodes=original&language=en";
+const ITEM_QUERY = "language=en";
 const STATUS_DEFINITIONS = [
   { status: "watching", key: "simkl:status:watching", title: "Watching", types: ["series"] },
   {
@@ -192,24 +194,32 @@ async function fetchAllItems(path, profileId) {
   return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
 }
 
-async function fetchStatusEntries(profileId) {
+async function fetchAllTypeEntries(type, profileId) {
+  const query = type === "movies" ? ITEM_QUERY : EPISODE_QUERY;
+  let payload;
+  try {
+    payload = await fetchAllItems(`/sync/all-items/${type}?${query}`, profileId);
+  } catch (error) {
+    if (error?.status !== 400 || String(error?.payload?.error || "") !== "max_items") {
+      throw error;
+    }
+    payload = await fetchAllItems(`/sync/all-items/${type}?${ITEM_QUERY}`, profileId);
+  }
+  return flattenAllItems({ [type]: payload[type] });
+}
+
+async function fetchInitialEntries(profileId) {
   const entries = [];
-  for (const definition of STATUS_DEFINITIONS) {
-    const payload = await fetchAllItems(
-      `/sync/all-items/all/${definition.status}?${EXTENDED_QUERY}`,
-      profileId
-    );
-    entries.push(
-      ...flattenAllItems(payload).map((entry) => ({ ...entry, status: definition.status }))
-    );
+  for (const type of ["shows", "movies", "anime"]) {
+    entries.push(...(await fetchAllTypeEntries(type, profileId)));
   }
   return entries;
 }
 
 async function initialSync(profileId) {
-  const entries = await fetchStatusEntries(profileId);
-  const { payload: playback } = await simklRequest("/sync/playback", { profileId });
   const { payload: activities } = await simklRequest("/sync/activities", { profileId });
+  const entries = await fetchInitialEntries(profileId);
+  const { payload: playback } = await simklRequest("/sync/playback", { profileId });
   const now = Date.now();
   return {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -225,6 +235,25 @@ async function initialSync(profileId) {
     lastSyncedAt: now,
     lastCheckedAt: now
   };
+}
+
+function mergeEntries(currentEntries = [], changedEntries = []) {
+  const entriesByKey = new Map(
+    currentEntries.map((entry) => [entryStableKey(entry), entry]).filter(([key]) => Boolean(key))
+  );
+  changedEntries.forEach((entry) => {
+    const key = entryStableKey(entry);
+    if (key && statusDefinitionForEntry(entry)) entriesByKey.set(key, entry);
+  });
+  return Array.from(entriesByKey.values());
+}
+
+function activeEntryKeys(payload) {
+  return new Set(
+    flattenAllItems(payload)
+      .map((entry) => entryStableKey(entry))
+      .filter(Boolean)
+  );
 }
 
 async function incrementalSync(current, profileId, { rereadPlayback = false } = {}) {
@@ -249,8 +278,24 @@ async function incrementalSync(current, profileId, { rereadPlayback = false } = 
     "dropped"
   ]);
   const removalsChanged = anyDomainChanged(current.activities, activities, ["removed_from_list"]);
-  const entries =
-    statusChanged || removalsChanged ? await fetchStatusEntries(profileId) : current.entries || [];
+  let entries = current.entries || [];
+  if (statusChanged) {
+    const dateFrom = current.activities?.all || current.watermark;
+    if (dateFrom) {
+      const payload = await fetchAllItems(
+        `/sync/all-items?date_from=${encodeURIComponent(dateFrom)}&${EPISODE_QUERY}`,
+        profileId
+      );
+      entries = mergeEntries(entries, flattenAllItems(payload));
+    } else {
+      entries = await fetchInitialEntries(profileId);
+    }
+  }
+  if (removalsChanged) {
+    const payload = await fetchAllItems("/sync/all-items?extended=simkl_ids_only", profileId);
+    const activeKeys = activeEntryKeys(payload);
+    entries = entries.filter((entry) => activeKeys.has(entryStableKey(entry)));
+  }
   let playback = current.playback || [];
   // Playback positions are what Continue Watching is built from, so a refresh
   // asked for on their behalf re-reads them rather than trusting the activity
@@ -590,13 +635,14 @@ export const SimklSyncService = {
     if (!SimklAuthService.isAuthenticated()) return false;
     const profileId = activeProfileId();
     if (refreshInFlight?.profileId === profileId) return refreshInFlight.promise;
-    const requestedAt = Date.now();
     const promise = withBrowserLock(`nuvio-simkl-sync:${profileId}`, async () => {
       if (!SimklAuthService.isAuthenticated()) return false;
       const current = getSnapshot(profileId);
       if (
         (!force && current.lastCheckedAt && Date.now() - current.lastCheckedAt < maxAgeMs) ||
-        (force && current.lastCheckedAt >= requestedAt)
+        (force &&
+          current.lastCheckedAt &&
+          Date.now() - current.lastCheckedAt < FORCED_REFRESH_INTERVAL_MS)
       ) {
         return false;
       }

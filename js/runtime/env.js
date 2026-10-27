@@ -54,6 +54,8 @@
       typeof existing.SIMKL_APP_NAME === "undefined" || !String(existing.SIMKL_APP_NAME).trim()
         ? "nuvio"
         : existing.SIMKL_APP_NAME,
+    MDBLIST_CLIENT_ID:
+      typeof existing.MDBLIST_CLIENT_ID === "undefined" ? "" : existing.MDBLIST_CLIENT_ID,
     AUTOMATION_SHORTCUT_URL:
       typeof existing.AUTOMATION_SHORTCUT_URL === "undefined"
         ? ""

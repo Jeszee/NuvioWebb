@@ -4,6 +4,8 @@ import { Platform } from "../../../platform/index.js";
 import { TraktAuthService } from "../../../data/repository/traktAuthService.js";
 import { SimklAuthService } from "../../../data/repository/simklAuthService.js";
 import { SimklSyncService } from "../../../data/repository/simklSyncService.js";
+import { MdbListAccount } from "../../../data/repository/mdbListAccount.js";
+import { MdbListLibraryService } from "../../../data/repository/mdbListLibraryService.js";
 import {
   SimklAnimeIdPreference,
   MoreLikeThisSourcePreference,
@@ -140,6 +142,9 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
     if (SimklAuthService.getCurrentAuthState().userCode) {
       this.startSimklPolling();
     }
+    if (MdbListAccount.getCurrentAuthState().userCode) {
+      this.startMdbListPolling();
+    }
   },
 
   async render({ refreshModel = true } = {}) {
@@ -226,11 +231,14 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
   renderTrackingSection() {
     const trakt = TraktAuthService.getCurrentAuthState();
     const simkl = SimklAuthService.getCurrentAuthState();
+    const mdblist = MdbListAccount.getCurrentAuthState();
     const settings = TraktSettingsStore.get();
     const traktConnected = TraktAuthService.isAuthenticated();
     const simklConnected = SimklAuthService.isAuthenticated();
+    const mdblistConnected = MdbListAccount.isAuthenticated();
     const traktWaiting = Boolean(trakt.deviceCode && trakt.expiresAt > Date.now());
     const simklWaiting = Boolean(simkl.userCode && simkl.expiresAt > Date.now());
+    const mdblistWaiting = Boolean(mdblist.userCode && mdblist.expiresAt > Date.now());
     const connectedWatchSources = [
       { id: WatchProgressSource.NUVIO_SYNC, label: "Nuvio Sync" },
       ...(traktConnected ? [{ id: WatchProgressSource.TRAKT, label: "Trakt" }] : []),
@@ -239,7 +247,8 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
     const connectedLibrarySources = [
       { id: TraktLibrarySourceMode.LOCAL, label: "Nuvio" },
       ...(traktConnected ? [{ id: TraktLibrarySourceMode.TRAKT, label: "Trakt" }] : []),
-      ...(simklConnected ? [{ id: TraktLibrarySourceMode.SIMKL, label: "Simkl" }] : [])
+      ...(simklConnected ? [{ id: TraktLibrarySourceMode.SIMKL, label: "Simkl" }] : []),
+      ...(mdblistConnected ? [{ id: TraktLibrarySourceMode.MDBLIST, label: "MDBList" }] : [])
     ];
 
     this.actionMap.set("tracking:trakt", () => {
@@ -256,14 +265,61 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
       this.simklErrorMessage = null;
       try {
         await SimklAuthService.startDeviceAuth();
-        this.simklStatusMessage = t("simkl_status_enter_code", {}, "Enter the code on Simkl to finish connecting.");
+        this.simklStatusMessage = t(
+          "simkl_status_enter_code",
+          {},
+          "Enter the code on Simkl to finish connecting."
+        );
         this.startSimklPolling();
       } catch (error) {
         this.simklErrorMessage = String(
-          error?.message || error || t("simkl_error_network", {}, "Unable to reach Simkl. Try again.")
+          error?.message ||
+            error ||
+            t("simkl_error_network", {}, "Unable to reach Simkl. Try again.")
         );
       }
       this.expandedProvider = "simkl";
+    });
+    this.actionMap.set("tracking:mdblist", () => {
+      this.expandedProvider = this.expandedProvider === "mdblist" ? null : "mdblist";
+    });
+    this.actionMap.set("tracking:mdblistConnect", async () => {
+      this.mdbListErrorMessage = null;
+      try {
+        await MdbListAccount.startDeviceAuth();
+        this.mdbListStatusMessage = "Enter the code on MDBList to connect.";
+        this.startMdbListPolling();
+      } catch (error) {
+        this.mdbListErrorMessage = String(error?.message || error);
+      }
+      this.expandedProvider = "mdblist";
+    });
+    this.actionMap.set("tracking:mdblistCancel", () => {
+      if (this.mdbListPollTimer) clearTimeout(this.mdbListPollTimer);
+      this.mdbListPollTimer = null;
+      MdbListAccount.cancelDeviceAuth();
+      this.mdbListStatusMessage = null;
+      this.mdbListErrorMessage = null;
+    });
+    this.actionMap.set("tracking:mdblistDisconnect", () => {
+      this.openOptionDialog({
+        title: "Disconnect MDBList?",
+        options: [
+          { id: "disconnect", label: "Disconnect" },
+          { id: "cancel", label: t("action_cancel", {}, "Cancel") }
+        ],
+        selectedId: "cancel",
+        returnFocusKey: "tracking:mdblist",
+        onSelect: async (option) => {
+          if (option.id !== "disconnect") return;
+          if (this.mdbListPollTimer) clearTimeout(this.mdbListPollTimer);
+          this.mdbListPollTimer = null;
+          await MdbListAccount.disconnect();
+          if (settings.librarySourceMode === TraktLibrarySourceMode.MDBLIST) {
+            TraktSettingsStore.setLibrarySourceMode(TraktLibrarySourceMode.LOCAL);
+          }
+        }
+      });
     });
     this.actionMap.set("tracking:traktDisconnect", () => {
       this.openOptionDialog({
@@ -317,7 +373,9 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
       } catch (error) {
         this.simklStatusMessage = null;
         this.simklErrorMessage = String(
-          error?.message || error || t("simkl_error_network", {}, "Unable to reach Simkl. Try again.")
+          error?.message ||
+            error ||
+            t("simkl_error_network", {}, "Unable to reach Simkl. Try again.")
         );
       }
     });
@@ -325,7 +383,9 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
       this.showSimklInfo = !this.showSimklInfo;
     });
     this.actionMap.set("tracking:simklVisit", () => window.open?.("https://simkl.com", "_blank"));
-    this.actionMap.set("tracking:simklDocs", () => window.open?.("https://api.simkl.org/guides/sync", "_blank"));
+    this.actionMap.set("tracking:simklDocs", () =>
+      window.open?.("https://api.simkl.org/guides/sync", "_blank")
+    );
     this.actionMap.set("tracking:librarySource", () =>
       this.openTrackingChoice({
         title: t("trakt_library_source_title", {}, "Library source"),
@@ -403,14 +463,28 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
         leadingIconSrc:
           id === "simkl"
             ? "assets/icons/simkl_tv_glyph.svg"
-            : "assets/icons/trakt_tv_glyph.svg",
+            : id === "mdblist"
+              ? "assets/icons/mdblist_trakt.svg"
+              : "assets/icons/trakt_tv_glyph.svg",
         title,
         subtitle: connected
-          ? t(id === "simkl" ? "simkl_connected_as" : "trakt_connected_as", [username || `${title} user`], `Connected as ${username || `${title} user`}`)
+          ? id === "mdblist"
+            ? `Connected as ${username || "MDBList user"}`
+            : t(
+                id === "simkl" ? "simkl_connected_as" : "trakt_connected_as",
+                [username || `${title} user`],
+                `Connected as ${username || `${title} user`}`
+              )
           : waiting
             ? t("tracking_status_waiting", {}, "Waiting for approval")
-            : t(id === "simkl" ? "simkl_connect" : "trakt_connect", {}, `Connect ${title}`),
-        value: connected ? t("tracking_status_connected", {}, "Connected") : waiting ? t("tracking_status_waiting", {}, "Waiting") : t("tracking_status_disconnected", {}, "Not connected")
+            : id === "mdblist"
+              ? `Connect ${title}`
+              : t(id === "simkl" ? "simkl_connect" : "trakt_connect", {}, `Connect ${title}`),
+        value: connected
+          ? t("tracking_status_connected", {}, "Connected")
+          : waiting
+            ? t("tracking_status_waiting", {}, "Waiting")
+            : t("tracking_status_disconnected", {}, "Not connected")
       });
 
     return `
@@ -427,10 +501,12 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
             <div class="settings-trakt-options-stack">
               ${providerRow({ id: "trakt", title: "Trakt", connected: traktConnected, waiting: traktWaiting, username: trakt.username })}
               ${providerRow({ id: "simkl", title: "Simkl", connected: simklConnected, waiting: simklWaiting, username: simkl.username })}
+              ${providerRow({ id: "mdblist", title: "MDBList", connected: mdblistConnected, waiting: mdblistWaiting, username: mdblist.username })}
             </div>
           </div>
           ${this.expandedProvider === "trakt" ? this.renderTrackingTraktAccount(trakt, traktConnected, traktWaiting) : ""}
           ${this.expandedProvider === "simkl" ? this.renderTrackingSimklAccount(simkl, simklConnected, simklWaiting) : ""}
+          ${this.expandedProvider === "mdblist" ? this.renderTrackingMdbListAccount(mdblist, mdblistConnected, mdblistWaiting) : ""}
           <div class="settings-trakt-card">
             <h3 class="settings-trakt-card-title">${escapeHtml(t("tracking_sources_title", {}, "Sources"))}</h3>
             <div class="settings-trakt-options-stack">
@@ -455,7 +531,10 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
 
   renderTrackingTraktAccount(auth, connected, waiting) {
     if (connected) {
-      const tokenRemainingMs = auth.createdAt && auth.expiresIn ? Math.max(0, (Number(auth.createdAt) + Number(auth.expiresIn)) * 1000 - Date.now()) : 0;
+      const tokenRemainingMs =
+        auth.createdAt && auth.expiresIn
+          ? Math.max(0, (Number(auth.createdAt) + Number(auth.expiresIn)) * 1000 - Date.now())
+          : 0;
       return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("trakt_account_login", {}, "Trakt account"))}</h3><p class="settings-trakt-body-copy">${escapeHtml(t("trakt_connected_as", [auth.username || "Trakt user"], `Connected as ${auth.username || "Trakt user"}`))}</p>${tokenRemainingMs ? `<p class="settings-trakt-meta-copy">${escapeHtml(t("trakt_token_refreshes", [formatCountdown(tokenRemainingMs)], `Token refreshes in ${formatCountdown(tokenRemainingMs)}`))}</p>` : ""}${this.renderTraktStatsStrip(this.traktStats, this.traktStatsLoading)}${this.renderActionRow({ focusKey: "tracking:traktDisconnect", title: t("trakt_disconnect", {}, "Disconnect Trakt"), subtitle: t("trakt_disconnect_subtitle", {}, "Remove this profile's Trakt connection") })}</div>`;
     }
     return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("trakt_connect", {}, "Connect Trakt"))}</h3>${waiting ? `<p class="settings-trakt-body-copy">${escapeHtml(t("trakt_awaiting_instruction", {}, "Open the Trakt activation page on another device and enter this code."))}</p><strong>${escapeHtml(auth.verificationUrl || "https://trakt.tv/activate")}</strong><div class="settings-trakt-code">${escapeHtml(auth.userCode || "-")}</div><p class="settings-trakt-meta-copy">${escapeHtml(t("trakt_code_expires", [formatCountdown(Number(auth.expiresAt) - Date.now())], `Code expires in ${formatCountdown(Number(auth.expiresAt) - Date.now())}`))}</p>` : `<p class="settings-trakt-body-copy">${escapeHtml(t("trakt_manual_code_description", {}, "A manual activation code will be shown here. No QR code is required."))}</p>${this.renderActionRow({ focusKey: "tracking:traktConnect", title: t("trakt_connect", {}, "Connect Trakt"), subtitle: TraktAuthService.hasRequiredCredentials() ? t("trakt_generate_code", {}, "Generate activation code") : t("trakt_missing_credentials", {}, "Missing Trakt client credentials") })}`}${this.traktStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.traktStatusMessage)}</p>` : ""}${this.traktErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.traktErrorMessage)}</p>` : ""}</div>`;
@@ -466,6 +545,73 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
       return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("simkl_account_title", {}, "Simkl account"))}</h3><p class="settings-trakt-body-copy">${escapeHtml(t("simkl_connected_as", [auth.username || "Simkl user"], `Connected as ${auth.username || "Simkl user"}`))}</p>${this.renderActionRow({ focusKey: "tracking:simklSync", title: t("simkl_sync_now", {}, "Sync now"), subtitle: t("simkl_status_syncing", {}, "Check Simkl immediately for remote changes") })}${this.renderActionRow({ focusKey: "tracking:simklVisit", title: t("simkl_visit", {}, "Visit Simkl") })}${this.renderActionRow({ focusKey: "tracking:simklInfo", title: t("simkl_sync_info_action", {}, "How syncing works"), subtitle: t("simkl_sync_info_title", {}, "Automatic refresh and Continue Watching rules") })}${this.showSimklInfo ? `<div class="settings-tracking-sync-info"><p>${escapeHtml(t("simkl_sync_info_description", [15], "Nuvio checks Simkl automatically at most once every 15 minutes."))}</p><p>${escapeHtml(t("simkl_sync_info_activity", {}, "Each refresh downloads only changes."))}</p><p>${escapeHtml(t("simkl_sync_info_manual", {}, "Changes made in Nuvio are sent immediately."))}</p><p>${escapeHtml(t("simkl_sync_info_library_statuses", {}, "On Hold and Dropped shows stay hidden from Continue Watching."))}</p>${this.renderActionRow({ focusKey: "tracking:simklDocs", title: t("simkl_sync_info_docs", {}, "Read the Simkl sync guide") })}</div>` : ""}${this.renderActionRow({ focusKey: "tracking:simklDisconnect", title: t("simkl_disconnect", {}, "Disconnect Simkl"), subtitle: t("simkl_disconnect_subtitle", {}, "Remove this profile's Simkl connection") })}${this.simklStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.simklStatusMessage)}</p>` : ""}${this.simklErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.simklErrorMessage)}</p>` : ""}</div>`;
     }
     return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("simkl_connect", {}, "Connect Simkl"))}</h3>${waiting ? `<p class="settings-trakt-body-copy">${escapeHtml(t("simkl_awaiting_instruction", {}, "Open the Simkl verification page and enter this code."))}</p><strong>${escapeHtml(auth.verificationUrl || "https://simkl.com/activate")}</strong><div class="settings-trakt-code">${escapeHtml(auth.userCode || "-")}</div><p class="settings-trakt-meta-copy">${escapeHtml(t("simkl_code_expires", [formatCountdown(Number(auth.expiresAt) - Date.now())], `Code expires in ${formatCountdown(Number(auth.expiresAt) - Date.now())}`))}</p>` : `<p class="settings-trakt-body-copy">${escapeHtml(t("simkl_description", {}, "A one-time device code will be shown here. Enter it on Simkl from a phone or computer."))}</p>${this.renderActionRow({ focusKey: "tracking:simklConnect", title: t("simkl_connect", {}, "Connect Simkl"), subtitle: SimklAuthService.hasRequiredCredentials() ? t("simkl_status_enter_code", {}, "Generate activation code") : t("simkl_missing_credentials", {}, "Missing SIMKL_CLIENT_ID") })}`}${this.simklStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.simklStatusMessage)}</p>` : ""}${this.simklErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.simklErrorMessage)}</p>` : ""}</div>`;
+  },
+
+  renderTrackingMdbListAccount(auth, connected, waiting) {
+    if (connected) {
+      return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">MDBList account</h3><p class="settings-trakt-body-copy">${escapeHtml(`Connected as ${auth.username || "MDBList user"}`)}</p>${this.renderActionRow({ focusKey: "tracking:mdblistDisconnect", title: "Disconnect MDBList", subtitle: "Remove this profile's MDBList connection" })}${this.mdbListStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.mdbListStatusMessage)}</p>` : ""}${this.mdbListErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.mdbListErrorMessage)}</p>` : ""}</div>`;
+    }
+    return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">Connect MDBList</h3>${waiting ? `<p class="settings-trakt-body-copy">Open the MDBList verification page and enter this code.</p><strong>${escapeHtml(auth.verificationUrl || "https://mdblist.com/oauth/device")}</strong><div class="settings-trakt-code">${escapeHtml(auth.userCode || "-")}</div><p class="settings-trakt-meta-copy">Code expires in ${escapeHtml(formatCountdown(Number(auth.expiresAt) - Date.now()))}</p>${this.renderActionRow({ focusKey: "tracking:mdblistCancel", title: "Cancel MDBList connection", subtitle: "Stop waiting and clear this device code" })}` : `<p class="settings-trakt-body-copy">Connect an MDBList account to use its watchlist and personal lists as your Library.</p>${this.renderActionRow({ focusKey: "tracking:mdblistConnect", title: "Connect MDBList", subtitle: MdbListAccount.isConfigured() ? "Generate a one-time device code" : "Missing MDBLIST_CLIENT_ID" })}`}${this.mdbListStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.mdbListStatusMessage)}</p>` : ""}${this.mdbListErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.mdbListErrorMessage)}</p>` : ""}</div>`;
+  },
+
+  startMdbListPolling() {
+    if (this.mdbListPollTimer) return;
+    const poll = async () => {
+      const state = MdbListAccount.getCurrentAuthState();
+      if (!state.userCode || Router.getCurrent() !== "trakt") {
+        this.mdbListPollTimer = null;
+        return;
+      }
+      let result;
+      try {
+        result = await MdbListAccount.pollDeviceAuth();
+      } catch (error) {
+        result =
+          error?.status === 429
+            ? { type: "rate_limited", retryAfterMs: Number(error.retryAfterMs || 60_000) }
+            : { type: "failed", message: String(error?.message || error) };
+      }
+      if (result.type === "approved") {
+        this.mdbListPollTimer = null;
+        this.mdbListStatusMessage = `Connected as ${result.username || "MDBList"}`;
+        try {
+          await MdbListLibraryService.refreshNow();
+        } catch (error) {
+          this.mdbListErrorMessage = String(error?.message || error);
+        }
+        await this.render();
+        return;
+      }
+      if (result.type === "expired" || result.type === "invalidated") {
+        this.mdbListPollTimer = null;
+        this.mdbListErrorMessage = "MDBList authorization expired. Start again.";
+        await this.render();
+        return;
+      }
+      if (result.type === "failed") {
+        this.mdbListPollTimer = null;
+        this.mdbListErrorMessage = result.message;
+        await this.render();
+        return;
+      }
+      this.mdbListStatusMessage =
+        result.type === "slow_down" || result.type === "rate_limited"
+          ? "MDBList asked Nuvio to slow down; waiting before retrying."
+          : "Waiting for MDBList approval…";
+      await this.render();
+      const next = MdbListAccount.getCurrentAuthState();
+      this.mdbListPollTimer = setTimeout(
+        () => {
+          this.mdbListPollTimer = null;
+          void poll();
+        },
+        Math.max(
+          Math.max(1, Number(next.pollInterval || 5)) * 1000,
+          Number(result.retryAfterMs || 0)
+        )
+      );
+    };
+    void poll();
   },
 
   startSimklPolling(force = false) {
@@ -492,16 +638,14 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
           [result.username || "Simkl"],
           `Connected as ${result.username || "Simkl"}`
         );
-        await SimklSyncService.refresh({ force: true }).catch(() => false);
+        await SimklSyncService.refresh({ force: true }).catch((error) => {
+          this.simklErrorMessage = String(error?.message || error);
+        });
         await this.render();
         return;
       }
       if (result.type === "pending") {
-        this.simklStatusMessage = t(
-          "simkl_status_waiting",
-          {},
-          "Waiting for Simkl approval…"
-        );
+        this.simklStatusMessage = t("simkl_status_waiting", {}, "Waiting for Simkl approval…");
       } else if (result.type === "expired" || result.type === "invalidated") {
         this.simklErrorMessage = t(
           "simkl_error_code_expired",
@@ -730,11 +874,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
         return;
       }
       if (result.type === "pending") {
-        this.traktStatusMessage = t(
-          "tracking_status_waiting",
-          {},
-          "Waiting for approval"
-        );
+        this.traktStatusMessage = t("tracking_status_waiting", {}, "Waiting for approval");
         this.traktErrorMessage = null;
       } else if (result.type === "slow_down") {
         this.traktStatusMessage = t(
@@ -754,11 +894,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
       } else if (result.type === "denied") {
         this.stopTraktPolling();
         this.traktStatusMessage = null;
-        this.traktErrorMessage = t(
-          "trakt_error_denied",
-          {},
-          "Authorization denied on Trakt."
-        );
+        this.traktErrorMessage = t("trakt_error_denied", {}, "Authorization denied on Trakt.");
       } else if (result.type === "already_used") {
         this.stopTraktPolling();
         this.traktStatusMessage = null;
@@ -770,8 +906,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
       } else if (result.type === "failed") {
         this.traktStatusMessage = null;
         this.traktErrorMessage =
-          result.message ||
-          t("trakt_error_network_retry", {}, "Network error, please try again");
+          result.message || t("trakt_error_network_retry", {}, "Network error, please try again");
       }
       await this.render();
       const nextState = TraktAuthService.getCurrentAuthState();
@@ -807,6 +942,10 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
     if (this.simklPollTimer) {
       clearTimeout(this.simklPollTimer);
       this.simklPollTimer = null;
+    }
+    if (this.mdbListPollTimer) {
+      clearTimeout(this.mdbListPollTimer);
+      this.mdbListPollTimer = null;
     }
     this.stopTraktPolling?.();
     this.stopTraktClock();

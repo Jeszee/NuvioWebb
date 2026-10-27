@@ -101,6 +101,8 @@ import { QrCodeGenerator } from "../../../core/qr/qrCodeGenerator.js";
 import { TraktAuthService } from "../../../data/repository/traktAuthService.js";
 import { SimklAuthService } from "../../../data/repository/simklAuthService.js";
 import { SimklSyncService } from "../../../data/repository/simklSyncService.js";
+import { MdbListAccount } from "../../../data/repository/mdbListAccount.js";
+import { MdbListLibraryService } from "../../../data/repository/mdbListLibraryService.js";
 import { mdbListRepository } from "../../../data/repository/mdbListRepository.js";
 import {
   getStreamBadgePreviewSections,
@@ -8652,6 +8654,75 @@ export const SettingsScreen = {
     void poll();
   },
 
+  stopDesktopMdbListPolling() {
+    if (this.desktopMdbListPollTimer) {
+      clearTimeout(this.desktopMdbListPollTimer);
+      this.desktopMdbListPollTimer = null;
+    }
+  },
+
+  startDesktopMdbListPolling() {
+    if (this.desktopMdbListPollTimer) return;
+    const poll = async () => {
+      const auth = MdbListAccount.getCurrentAuthState();
+      if (!auth.userCode || !isSettingsPageCurrent() || this.activeSection !== "trakt") {
+        this.stopDesktopMdbListPolling();
+        return;
+      }
+      let result;
+      try {
+        result = await MdbListAccount.pollDeviceAuth();
+      } catch (error) {
+        result =
+          error?.status === 429
+            ? { type: "rate_limited", retryAfterMs: Number(error.retryAfterMs || 60_000) }
+            : { type: "failed", message: String(error?.message || error) };
+      }
+      if (result.type === "approved") {
+        this.stopDesktopMdbListPolling();
+        this.desktopMdbListStatusMessage = `Connected as ${result.username || "MDBList user"}`;
+        this.desktopMdbListErrorMessage = null;
+        try {
+          await MdbListLibraryService.refreshNow();
+        } catch (error) {
+          this.desktopMdbListErrorMessage = String(error?.message || error);
+        }
+        await this.render();
+        return;
+      }
+      if (result.type === "expired" || result.type === "invalidated") {
+        this.stopDesktopMdbListPolling();
+        this.desktopMdbListStatusMessage = null;
+        this.desktopMdbListErrorMessage = "MDBList authorization expired. Start again.";
+      } else if (result.type === "failed") {
+        this.stopDesktopMdbListPolling();
+        this.desktopMdbListStatusMessage = null;
+        this.desktopMdbListErrorMessage = result.message;
+      } else {
+        this.desktopMdbListStatusMessage =
+          result.type === "slow_down" || result.type === "rate_limited"
+            ? "MDBList asked Nuvio to slow down; waiting before retrying."
+            : "Waiting for MDBList approval...";
+        this.desktopMdbListErrorMessage = null;
+      }
+      await this.render();
+      const next = MdbListAccount.getCurrentAuthState();
+      if (next.userCode && !this.desktopMdbListPollTimer) {
+        this.desktopMdbListPollTimer = setTimeout(
+          () => {
+            this.desktopMdbListPollTimer = null;
+            void poll();
+          },
+          Math.max(
+            Math.max(1, Number(next.pollInterval || 5)) * 1000,
+            Number(result.retryAfterMs || 0)
+          )
+        );
+      }
+    };
+    void poll();
+  },
+
   stopDesktopTraktPolling() {
     if (this.desktopTraktPollTimer) {
       clearTimeout(this.desktopTraktPollTimer);
@@ -8715,14 +8786,20 @@ export const SettingsScreen = {
     const settings = TraktSettingsStore.get();
     const trakt = TraktAuthService.getCurrentAuthState();
     const simkl = SimklAuthService.getCurrentAuthState();
+    const mdblist = MdbListAccount.getCurrentAuthState();
     const traktConnected = TraktAuthService.isAuthenticated();
     const simklConnected = SimklAuthService.isAuthenticated();
+    const mdblistConnected = MdbListAccount.isAuthenticated();
     const traktBridgeStatus = TraktAuthService.getBrowserBridgeStatus();
     const traktWaiting = Boolean(trakt.deviceCode && Number(trakt.expiresAt || 0) > Date.now());
     const simklWaiting = Boolean(simkl.userCode && Number(simkl.expiresAt || 0) > Date.now());
+    const mdblistWaiting = Boolean(mdblist.userCode && Number(mdblist.expiresAt || 0) > Date.now());
     const expanded = this.desktopTrackingExpanded || {};
     if (simklWaiting) {
       this.startDesktopSimklPolling();
+    }
+    if (mdblistWaiting) {
+      this.startDesktopMdbListPolling();
     }
     if (traktWaiting) {
       this.startDesktopTraktPolling();
@@ -8730,7 +8807,8 @@ export const SettingsScreen = {
     const librarySources = [
       { id: TraktLibrarySourceMode.LOCAL, label: "Nuvio" },
       ...(traktConnected ? [{ id: TraktLibrarySourceMode.TRAKT, label: "Trakt" }] : []),
-      ...(simklConnected ? [{ id: TraktLibrarySourceMode.SIMKL, label: "Simkl" }] : [])
+      ...(simklConnected ? [{ id: TraktLibrarySourceMode.SIMKL, label: "Simkl" }] : []),
+      ...(mdblistConnected ? [{ id: TraktLibrarySourceMode.MDBLIST, label: "MDBList" }] : [])
     ];
     const progressSources = [
       { id: WatchProgressSource.NUVIO_SYNC, label: "Nuvio Sync" },
@@ -8740,6 +8818,9 @@ export const SettingsScreen = {
 
     this.actionMap.set("tracking:desktop:trakt", () => this.toggleDesktopTrackingSection("trakt"));
     this.actionMap.set("tracking:desktop:simkl", () => this.toggleDesktopTrackingSection("simkl"));
+    this.actionMap.set("tracking:desktop:mdblist", () =>
+      this.toggleDesktopTrackingSection("mdblist")
+    );
     this.actionMap.set("tracking:desktop:behavior", () =>
       this.toggleDesktopTrackingSection("behavior")
     );
@@ -8792,6 +8873,48 @@ export const SettingsScreen = {
       SimklAuthService.cancelDeviceAuth();
       this.desktopSimklStatusMessage = null;
       this.desktopSimklErrorMessage = null;
+    });
+    this.actionMap.set("tracking:desktop:mdblist:connect", async () => {
+      this.desktopMdbListErrorMessage = null;
+      try {
+        await MdbListAccount.startDeviceAuth();
+        this.desktopMdbListStatusMessage = "Waiting for MDBList approval...";
+        this.desktopTrackingExpanded = { ...this.desktopTrackingExpanded, mdblist: true };
+        this.startDesktopMdbListPolling();
+      } catch (error) {
+        this.desktopMdbListStatusMessage = null;
+        this.desktopMdbListErrorMessage = String(error?.message || error);
+      }
+      await this.render();
+    });
+    this.actionMap.set("tracking:desktop:mdblist:open", () => {
+      const url = String(MdbListAccount.getCurrentAuthState().verificationUrl || "").trim();
+      if (url) window.open?.(url, "_blank", "noopener,noreferrer");
+    });
+    this.actionMap.set("tracking:desktop:mdblist:cancel", () => {
+      this.stopDesktopMdbListPolling();
+      MdbListAccount.cancelDeviceAuth();
+      this.desktopMdbListStatusMessage = null;
+      this.desktopMdbListErrorMessage = null;
+    });
+    this.actionMap.set("tracking:desktop:mdblist:disconnect", () => {
+      this.openOptionDialog({
+        title: "Disconnect MDBList?",
+        options: [
+          { id: "disconnect", label: "Disconnect" },
+          { id: "cancel", label: "Cancel" }
+        ],
+        selectedId: "cancel",
+        returnFocusKey: "tracking:desktop:mdblist",
+        onSelect: async (option) => {
+          if (option.id !== "disconnect") return;
+          this.stopDesktopMdbListPolling();
+          await MdbListAccount.disconnect();
+          if (TraktSettingsStore.get().librarySourceMode === TraktLibrarySourceMode.MDBLIST) {
+            TraktSettingsStore.setLibrarySourceMode(TraktLibrarySourceMode.LOCAL);
+          }
+        }
+      });
     });
     this.actionMap.set("tracking:desktop:simkl:refresh", async () => {
       this.desktopSimklStatusMessage = "Syncing Simkl...";
@@ -8918,6 +9041,23 @@ export const SettingsScreen = {
            </div>`
         : `<p class="settings-row-subtitle">Connect Simkl to sync lists, watched history, playback progress, and scrobbles.</p>
            ${inlineButton("tracking:desktop:simkl:connect", "Connect Simkl")}`;
+    const mdblistBody = mdblistConnected
+      ? `<p class="settings-tracking-provider-status">Connected as ${escapeHtml(mdblist.username || "MDBList user")}</p>
+         ${inlineButton("tracking:desktop:mdblist:disconnect", "Disconnect", "is-danger")}`
+      : mdblistWaiting
+        ? `<div class="settings-tracking-activation">
+             <div class="settings-row-title">Enter this code on MDBList</div>
+             <p class="settings-row-subtitle">Open MDBList authorization and enter this code to approve Nuvio.</p>
+             <code class="settings-tracking-activation-code">${escapeHtml(mdblist.userCode || "-")}</code>
+             <div class="settings-tracking-activation-url">${escapeHtml(mdblist.verificationUrl || "https://mdblist.com/oauth/device")}</div>
+             <div class="settings-tracking-inline-actions">
+               ${inlineButton("tracking:desktop:mdblist:open", "Open MDBList")}
+               ${inlineButton("tracking:desktop:mdblist:cancel", "Cancel", "is-secondary")}
+             </div>
+             <p class="settings-tracking-provider-status">${escapeHtml(this.desktopMdbListStatusMessage || "Waiting for MDBList approval...")}</p>
+           </div>`
+        : `<p class="settings-row-subtitle">Connect MDBList to use its watchlist and personal lists as your Library.</p>
+           ${inlineButton("tracking:desktop:mdblist:connect", "Connect MDBList")}`;
     const traktBody = traktConnected
       ? `<p class="settings-tracking-provider-status">Connected as ${escapeHtml(trakt.username || "Trakt user")}</p>
          ${inlineButton("tracking:desktop:trakt:disconnect", "Disconnect", "is-danger")}`
@@ -8952,6 +9092,7 @@ export const SettingsScreen = {
         <div class="settings-stack settings-desktop-tracking-stack">
           ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:trakt", title: "Trakt", subtitle: traktConnected ? `Connected as ${trakt.username || "Trakt user"}` : traktWaiting ? "Waiting for approval" : traktBridgeStatus === "unavailable" ? "Unavailable on this server" : "Not connected", expanded: Boolean(expanded.trakt), bodyHtml: expanded.trakt ? `${traktBody}${this.desktopTraktErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopTraktErrorMessage)}</p>` : ""}` : "", classes: "settings-collapsible-tracking" })}
           ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:simkl", title: "Simkl", subtitle: simklConnected ? `Connected as ${simkl.username || "Simkl user"}` : simklWaiting ? "Waiting for approval" : "Not connected", expanded: Boolean(expanded.simkl), bodyHtml: expanded.simkl ? `${simklBody}${this.desktopSimklErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopSimklErrorMessage)}</p>` : ""}` : "", classes: "settings-collapsible-tracking" })}
+          ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:mdblist", title: "MDBList", subtitle: mdblistConnected ? `Connected as ${mdblist.username || "MDBList user"}` : mdblistWaiting ? "Waiting for approval" : "Not connected", expanded: Boolean(expanded.mdblist), bodyHtml: expanded.mdblist ? `${mdblistBody}${this.desktopMdbListErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopMdbListErrorMessage)}</p>` : ""}` : "", classes: "settings-collapsible-tracking" })}
           ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:behavior", title: "Sources & Behavior", subtitle: "Choose the sources used for Library, progress, and related content.", expanded: Boolean(expanded.behavior), bodyHtml: expanded.behavior ? behaviorBody : "", classes: "settings-collapsible-tracking" })}
         </div>
       </div>
@@ -10364,6 +10505,7 @@ export const SettingsScreen = {
     this.stopTraktPolling?.();
     this.stopDesktopTraktPolling?.();
     this.stopDesktopSimklPolling?.();
+    this.stopDesktopMdbListPolling?.();
     this.stopDebridDeviceAuth();
     this.desktopAddonManager?.dispose?.();
     const containerListeners = this.container?.__settingsListeners;
