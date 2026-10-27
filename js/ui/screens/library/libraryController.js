@@ -711,32 +711,47 @@ export class LibraryController {
       this.onChange(this.getState());
     }
 
-    const sourceMode = await libraryRepository.getSourceMode();
-    if (this.disposed || reloadToken !== this.reloadToken) {
-      return;
-    }
-    let [listTabs, allItems, watchedItems] = await Promise.all([
-      libraryRepository.getListTabs({ sourceMode }),
-      libraryRepository.getItems({ hydrate: false, sourceMode }),
-      watchedItemsRepository.getAll().catch(() => [])
-    ]);
-    if (this.disposed || reloadToken !== this.reloadToken) {
-      return;
-    }
-
+    let sourceMode;
+    let listTabs;
+    let allItems;
+    let watchedItems;
     // Genre and year are metadata-derived. On a history restoration, wait for
     // that metadata before publishing the first content state so the restored
     // filters are never painted as defaults and then applied a second time.
     const waitForPendingFacetMetadata = Boolean(
       this.pendingFacetRouteState?.selectedGenre || this.pendingFacetRouteState?.selectedYear
     );
-    if (waitForPendingFacetMetadata) {
-      allItems = await libraryRepository.hydrateItems(allItems, {
-        shouldContinue: () => !this.disposed && reloadToken === this.reloadToken
-      });
+    try {
+      sourceMode = await libraryRepository.getSourceMode();
       if (this.disposed || reloadToken !== this.reloadToken) {
-        return;
+        return false;
       }
+      [listTabs, allItems, watchedItems] = await Promise.all([
+        libraryRepository.getListTabs({ sourceMode }),
+        libraryRepository.getItems({ hydrate: false, sourceMode }),
+        watchedItemsRepository.getAll().catch(() => [])
+      ]);
+      if (this.disposed || reloadToken !== this.reloadToken) {
+        return false;
+      }
+      if (waitForPendingFacetMetadata) {
+        allItems = await libraryRepository.hydrateItems(allItems, {
+          shouldContinue: () => !this.disposed && reloadToken === this.reloadToken
+        });
+        if (this.disposed || reloadToken !== this.reloadToken) {
+          return false;
+        }
+      }
+    } catch (error) {
+      if (this.disposed || reloadToken !== this.reloadToken) {
+        return false;
+      }
+      console.warn("Library reload failed", error);
+      this.setState({ isLoading: false, isSyncing: false });
+      this.setError(
+        error?.message || t("library_error_refresh_failed", {}, "Failed to load library")
+      );
+      return false;
     }
 
     const pendingRouteState = this.pendingRouteState;
@@ -889,6 +904,7 @@ export class LibraryController {
           console.warn("Library metadata enrichment failed", error);
         }
       });
+    return true;
   }
 
   getSourceLabel() {
@@ -1565,7 +1581,10 @@ export class LibraryController {
       if (elapsed < SYNC_LOADING_MIN_MS) {
         await delay(SYNC_LOADING_MIN_MS - elapsed);
       }
-      await this.reload({ preserveOverlay: true });
+      const reloaded = await this.reload({ preserveOverlay: true });
+      if (!reloaded) {
+        return;
+      }
       this.setTransientMessage(t("library_message_synced", {}, "Library synced"));
       this.setState({ isSyncing: false });
     } catch (error) {

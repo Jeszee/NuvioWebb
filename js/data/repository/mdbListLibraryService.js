@@ -8,6 +8,7 @@ const WATCHLIST = {
   key: "mdblist:watchlist",
   title: "Watchlist",
   type: "watchlist",
+  isMembershipDestination: true,
   trackingProviderId: "mdblist",
   supportedContentTypes: ["movie", "series"]
 };
@@ -274,7 +275,7 @@ async function fetchTabs(id, userId) {
 
 async function synchronize(id, force = false) {
   const { payload: user } = await MdbListAccount.api("/user", { profileId: id });
-  const userId = positiveId(user?.id);
+  const userId = positiveId(user?.user_id ?? user?.id);
   if (!userId) throw new Error("MDBList returned an invalid account");
   const previous = storedSnapshot(id);
   const tabs = await fetchTabs(id, userId);
@@ -451,7 +452,7 @@ export const MdbListLibraryService = {
       const { payload } = await MdbListAccount.api(path, {
         profileId: id,
         method: "POST",
-        body: { [bucket]: [key === WATCHLIST.key ? { ids } : ids] }
+        body: { [bucket]: [ids] }
       });
       requireCurrentProfile(id);
       const rawCount = (name) =>

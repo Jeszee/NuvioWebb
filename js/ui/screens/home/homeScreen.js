@@ -2737,6 +2737,9 @@ export function createPosterCardMarkup(
              data-item-id="${escapeAttribute(normalized.id)}"
              data-item-type="${escapeAttribute(normalized.type || itemType || "movie")}"
              data-item-title="${escapeAttribute(normalized.name || "Untitled")}"
+             data-imdb-id="${escapeAttribute(normalized.ids?.imdb || normalized.imdbId || normalized.imdb_id || "")}"
+             data-tmdb-id="${escapeAttribute(normalized.ids?.tmdb || normalized.tmdbId || normalized.tmdb_id || "")}"
+             data-trakt-id="${escapeAttribute(normalized.ids?.trakt || normalized.traktId || normalized.trakt_id || "")}"
              data-poster-src="${escapeAttribute(posterSrc || "")}"
              data-backdrop-src="${escapeAttribute(backdropSrc || "")}"
              data-logo-src="${escapeAttribute(normalized.logo || "")}"
@@ -5170,6 +5173,14 @@ export const HomeScreen = {
       {
         id: node.dataset.itemId || "",
         type: node.dataset.itemType || "movie",
+        ids: {
+          ...(node.dataset.imdbId ? { imdb: node.dataset.imdbId } : {}),
+          ...(node.dataset.tmdbId ? { tmdb: Number(node.dataset.tmdbId) } : {}),
+          ...(node.dataset.traktId ? { trakt: Number(node.dataset.traktId) } : {})
+        },
+        imdbId: node.dataset.imdbId || null,
+        tmdbId: node.dataset.tmdbId ? Number(node.dataset.tmdbId) : null,
+        traktId: node.dataset.traktId ? Number(node.dataset.traktId) : null,
         name: node.dataset.itemTitle || "Untitled",
         poster: node.dataset.posterSrc || null,
         background: node.dataset.backdropSrc || null,

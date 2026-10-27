@@ -21,12 +21,14 @@ async function withLibraryFixture(fixture, run) {
     getSourceMode: libraryRepository.getSourceMode,
     getListTabs: libraryRepository.getListTabs,
     getItems: libraryRepository.getItems,
+    refreshNow: libraryRepository.refreshNow,
     hydrateItems: libraryRepository.hydrateItems,
     getWatchedItems: watchedItemsRepository.getAll
   };
   libraryRepository.getSourceMode = async () => fixture.sourceMode;
   libraryRepository.getListTabs = async () => fixture.listTabs || [];
-  libraryRepository.getItems = async () => fixture.items || [];
+  libraryRepository.getItems = fixture.getItems || (async () => fixture.items || []);
+  libraryRepository.refreshNow = fixture.refreshNow || (async () => {});
   libraryRepository.hydrateItems = fixture.hydrateItems || (async (items) => items);
   watchedItemsRepository.getAll = async () => [];
   try {
@@ -35,6 +37,7 @@ async function withLibraryFixture(fixture, run) {
     libraryRepository.getSourceMode = originals.getSourceMode;
     libraryRepository.getListTabs = originals.getListTabs;
     libraryRepository.getItems = originals.getItems;
+    libraryRepository.refreshNow = originals.refreshNow;
     libraryRepository.hydrateItems = originals.hydrateItems;
     watchedItemsRepository.getAll = originals.getWatchedItems;
   }
@@ -219,6 +222,35 @@ test("LibraryController validates restored genre and year after metadata hydrati
         assert.equal(state.selectedGenre, "Action");
         assert.equal(state.selectedYear, "2024");
         assert.equal(state.selectedSortKey, "title_asc");
+      } finally {
+        controller.dispose();
+      }
+    }
+  );
+});
+
+test("LibraryController clears loading state and exposes an error when library loading fails", async () => {
+  await withLibraryFixture(
+    {
+      sourceMode: LibrarySourceMode.MDBLIST,
+      getItems: async () => {
+        throw new Error("Could not connect to MDBList. Check your connection and try again.");
+      }
+    },
+    async () => {
+      const controller = new LibraryController();
+      try {
+        const loaded = await controller.reload();
+        const state = controller.getState();
+        assert.equal(loaded, false);
+        assert.equal(state.isLoading, false);
+        assert.equal(state.isSyncing, false);
+        assert.match(state.errorMessage, /Could not connect to MDBList/);
+        await controller.refreshNow();
+        const refreshedState = controller.getState();
+        assert.equal(refreshedState.isLoading, false);
+        assert.equal(refreshedState.isSyncing, false);
+        assert.match(refreshedState.transientMessage, /Could not connect to MDBList/);
       } finally {
         controller.dispose();
       }

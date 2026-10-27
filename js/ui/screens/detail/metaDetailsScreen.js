@@ -1547,7 +1547,12 @@ function librarySnapshotHasMembership(listMembership = {}, sourceMode) {
   if (sourceMode === LibrarySourceMode.SIMKL) {
     return Object.values(listMembership).some(Boolean);
   }
-  const key = sourceMode === LibrarySourceMode.TRAKT ? "watchlist" : "local";
+  const key =
+    sourceMode === LibrarySourceMode.TRAKT
+      ? "watchlist"
+      : sourceMode === LibrarySourceMode.MDBLIST
+        ? "mdblist:watchlist"
+        : "local";
   return listMembership[key] === true;
 }
 
@@ -6602,9 +6607,22 @@ export const MetaDetailsScreen = {
   },
 
   getCurrentLibraryItem() {
+    const imdbId = resolveMetaImdbId(this.meta || {}, this.params || {});
+    const tmdbId = resolveMetaTmdbId(this.meta || {}, this.params || {});
+    const traktId = resolveMetaTraktId(this.meta || {}, this.params || {});
+    const ids = {
+      ...(this.meta?.ids && typeof this.meta.ids === "object" ? this.meta.ids : {}),
+      ...(imdbId ? { imdb: imdbId } : {}),
+      ...(tmdbId ? { tmdb: Number(tmdbId) } : {}),
+      ...(traktId ? { trakt: Number(traktId) } : {})
+    };
     return {
       itemId: this.params?.itemId || this.meta?.id || "",
       itemType: this.params?.itemType || this.meta?.type || "movie",
+      ids,
+      imdbId,
+      tmdbId: tmdbId ? Number(tmdbId) : null,
+      traktId: traktId ? Number(traktId) : null,
       title: this.meta?.name || this.params?.fallbackTitle || this.params?.itemId || "Untitled",
       poster: this.meta?.poster || null,
       background: this.meta?.background || this.meta?.landscapePoster || null,
@@ -7361,7 +7379,11 @@ export const MetaDetailsScreen = {
     if (sourceMode !== LibrarySourceMode.LOCAL) {
       const item = this.getCurrentLibraryItem();
       const defaultKey =
-        sourceMode === LibrarySourceMode.SIMKL ? "simkl:status:plantowatch" : "watchlist";
+        sourceMode === LibrarySourceMode.SIMKL
+          ? "simkl:status:plantowatch"
+          : sourceMode === LibrarySourceMode.MDBLIST
+            ? "mdblist:watchlist"
+            : "watchlist";
       // What is on screen is what the person is answering, so the icon turns
       // now. It used to wait for the provider: a write, then an activities
       // check, then a full list pull -- measured at 987ms on a healthy

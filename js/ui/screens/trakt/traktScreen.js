@@ -285,6 +285,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
     });
     this.actionMap.set("tracking:mdblistConnect", async () => {
       this.mdbListErrorMessage = null;
+      this.mdbListStatusMessage = null;
       try {
         await MdbListAccount.startDeviceAuth();
         this.mdbListStatusMessage = "Enter the code on MDBList to connect.";
@@ -293,6 +294,17 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
         this.mdbListErrorMessage = String(error?.message || error);
       }
       this.expandedProvider = "mdblist";
+    });
+    this.actionMap.set("tracking:mdblistSync", async () => {
+      this.mdbListStatusMessage = "Syncing MDBList...";
+      this.mdbListErrorMessage = null;
+      try {
+        await MdbListLibraryService.refreshNow();
+        this.mdbListStatusMessage = "MDBList sync completed. Reopen Library to see updates.";
+      } catch (error) {
+        this.mdbListStatusMessage = null;
+        this.mdbListErrorMessage = String(error?.message || error);
+      }
     });
     this.actionMap.set("tracking:mdblistCancel", () => {
       if (this.mdbListPollTimer) clearTimeout(this.mdbListPollTimer);
@@ -549,7 +561,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
 
   renderTrackingMdbListAccount(auth, connected, waiting) {
     if (connected) {
-      return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">MDBList account</h3><p class="settings-trakt-body-copy">${escapeHtml(`Connected as ${auth.username || "MDBList user"}`)}</p>${this.renderActionRow({ focusKey: "tracking:mdblistDisconnect", title: "Disconnect MDBList", subtitle: "Remove this profile's MDBList connection" })}${this.mdbListStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.mdbListStatusMessage)}</p>` : ""}${this.mdbListErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.mdbListErrorMessage)}</p>` : ""}</div>`;
+      return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">MDBList account</h3><p class="settings-trakt-body-copy">${escapeHtml(`Connected as ${auth.username || "MDBList user"}`)}</p>${this.renderActionRow({ focusKey: "tracking:mdblistSync", title: "Sync now", subtitle: "Fetch your latest MDBList watchlist and lists" })}${this.renderActionRow({ focusKey: "tracking:mdblistDisconnect", title: "Disconnect MDBList", subtitle: "Remove this profile's MDBList connection" })}${this.mdbListStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.mdbListStatusMessage)}</p>` : ""}${this.mdbListErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.mdbListErrorMessage)}</p>` : ""}</div>`;
     }
     return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">Connect MDBList</h3>${waiting ? `<p class="settings-trakt-body-copy">Open the MDBList verification page and enter this code.</p><strong>${escapeHtml(auth.verificationUrl || "https://mdblist.com/oauth/device")}</strong><div class="settings-trakt-code">${escapeHtml(auth.userCode || "-")}</div><p class="settings-trakt-meta-copy">Code expires in ${escapeHtml(formatCountdown(Number(auth.expiresAt) - Date.now()))}</p>${this.renderActionRow({ focusKey: "tracking:mdblistCancel", title: "Cancel MDBList connection", subtitle: "Stop waiting and clear this device code" })}` : `<p class="settings-trakt-body-copy">Connect an MDBList account to use its watchlist and personal lists as your Library.</p>${this.renderActionRow({ focusKey: "tracking:mdblistConnect", title: "Connect MDBList", subtitle: MdbListAccount.isConfigured() ? "Generate a one-time device code" : "Missing MDBLIST_CLIENT_ID" })}`}${this.mdbListStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.mdbListStatusMessage)}</p>` : ""}${this.mdbListErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.mdbListErrorMessage)}</p>` : ""}</div>`;
   },

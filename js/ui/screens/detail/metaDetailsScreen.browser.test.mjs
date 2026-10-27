@@ -135,3 +135,19 @@ test("the library button turns before the provider answers", async () => {
   // And it goes back if the write is refused.
   assert.match(toggle, /catch \(error\) \{[\s\S]*?this\.isSavedInLibrary = wasSaved;/);
 });
+
+test("the MDBList detail button targets the MDBList watchlist and recognizes its membership", async () => {
+  const source = await metaDetailsScreenSource();
+  const membership = source.match(/function librarySnapshotHasMembership\([\s\S]*?\n\}/)?.[0];
+  const toggle = source.match(/async toggleLibraryFromHero\(\) \{[\s\S]*?\n {2}\},/)?.[0];
+  const item = source.match(/getCurrentLibraryItem\(\) \{[\s\S]*?\n {2}\},/)?.[0];
+
+  assert.ok(membership, "library membership helper should be findable");
+  assert.ok(toggle, "library toggle should be findable");
+  assert.ok(item, "current library item builder should be findable");
+  assert.match(membership, /LibrarySourceMode\.MDBLIST[\s\S]*?"mdblist:watchlist"/);
+  assert.match(toggle, /LibrarySourceMode\.MDBLIST[\s\S]*?"mdblist:watchlist"/);
+  assert.match(item, /resolveMetaImdbId/);
+  assert.match(item, /resolveMetaTmdbId/);
+  assert.match(item, /ids,/);
+});

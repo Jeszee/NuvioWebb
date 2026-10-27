@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { posterItemFromNode } from "./posterOptionsMenu.js";
 
 // The rule this file protects: right-click, long-press and Hold Enter are three
 // ways to invoke one action system, not three action systems. Presentation may
@@ -11,6 +12,7 @@ import test from "node:test";
 
 const posterMenuUrl = new URL("./posterOptionsMenu.js", import.meta.url);
 const homeUrl = new URL("../screens/home/homeScreen.js", import.meta.url);
+const libraryUrl = new URL("../screens/library/libraryScreen.js", import.meta.url);
 const collectionUrl = new URL("../screens/collection/folderDetailScreen.js", import.meta.url);
 
 const SHARED_SCREENS = [
@@ -32,6 +34,48 @@ test("all three invocations build their options from one definition source", asy
     "options are computed once per open, not per presentation"
   );
   assert.match(source, /const actions = options\.map\(/);
+});
+
+test("poster list actions retain external provider IDs for MDBList writes", async () => {
+  const menuSource = await readFile(posterMenuUrl, "utf8");
+  const homeSource = await readFile(homeUrl, "utf8");
+  assert.match(menuSource, /dataset\.imdbId/);
+  assert.match(menuSource, /dataset\.tmdbId/);
+  assert.match(menuSource, /dataset\.traktId/);
+  assert.match(menuSource, /ids,\s*imdbId: ids\.imdb/);
+  assert.match(homeSource, /data-imdb-id=.*normalized\.ids\?\.imdb/);
+  assert.match(homeSource, /data-tmdb-id=.*normalized\.ids\?\.tmdb/);
+  assert.match(homeSource, /data-trakt-id=.*normalized\.ids\?\.trakt/);
+  assert.match(homeSource, /ids: \{[\s\S]{0,300}node\.dataset\.imdbId/);
+});
+
+test("poster node resolution passes provider IDs through to list actions", () => {
+  const item = posterItemFromNode({
+    dataset: {
+      itemId: "tmdb:123",
+      itemType: "movie",
+      imdbId: "tt7654321",
+      traktId: "456"
+    }
+  });
+  assert.deepEqual(item.ids, { imdb: "tt7654321", trakt: 456, tmdb: 123 });
+  assert.equal(item.imdbId, "tt7654321");
+  assert.equal(item.tmdbId, 123);
+  assert.equal(item.traktId, 456);
+  assert.equal(
+    posterItemFromNode({ dataset: { itemId: "tt1234567", itemType: "movie" } }).ids.imdb,
+    "tt1234567"
+  );
+});
+
+test("saved remote titles offer removal and library cards retain provider IDs", async () => {
+  const menuSource = await readFile(posterMenuUrl, "utf8");
+  const librarySource = await readFile(libraryUrl, "utf8");
+  assert.match(menuSource, /state\.isSaved && state\.sourceMode !== LibrarySourceMode\.LOCAL/);
+  assert.match(menuSource, /action: "removeFromLibrary"/);
+  assert.match(librarySource, /data-imdb-id=.*item\.ids\?\.imdb/);
+  assert.match(librarySource, /data-tmdb-id=.*item\.ids\?\.tmdb/);
+  assert.match(librarySource, /data-trakt-id=.*item\.ids\?\.trakt/);
 });
 
 test("all three invocations run one executor", async () => {

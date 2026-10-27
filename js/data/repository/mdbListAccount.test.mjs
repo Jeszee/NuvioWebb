@@ -18,10 +18,17 @@ globalThis.localStorage = {
 };
 globalThis.__NUVIO_PLATFORM__ = "browser";
 globalThis.__NUVIO_ENV__ = { MDBLIST_CLIENT_ID: "browser-public-mdblist-client" };
+globalThis.location = { origin: "http://localhost:4173", protocol: "http:" };
 
 const { Platform } = await import("../../platform/index.js");
 Platform.current = null;
 const { MdbListAccount } = await import("./mdbListAccount.js");
+function mdblistPath(url) {
+  const parsedUrl = new URL(String(url));
+  assert.equal(parsedUrl.origin, globalThis.location.origin);
+  assert.match(parsedUrl.pathname, /^\/api\/mdblist\//);
+  return parsedUrl.pathname.replace(/^\/api\/mdblist/, "");
+}
 
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -35,9 +42,9 @@ test("MDBList account connects with device OAuth and uses a bearer token for acc
   const calls = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options = {}) => {
-    const parsedUrl = new URL(String(url));
-    calls.push({ path: parsedUrl.pathname, options });
-    if (parsedUrl.pathname === "/oauth/device-authorization/") {
+    const path = mdblistPath(url);
+    calls.push({ path, options });
+    if (path === "/oauth/device-authorization/") {
       return json({
         device_code: "device-token",
         user_code: "ABCD-EFGH",
@@ -46,7 +53,7 @@ test("MDBList account connects with device OAuth and uses a bearer token for acc
         interval: 1
       });
     }
-    if (parsedUrl.pathname === "/oauth/token/") {
+    if (path === "/oauth/token/") {
       return json({
         access_token: "access-token",
         refresh_token: "refresh-token",
@@ -55,11 +62,11 @@ test("MDBList account connects with device OAuth and uses a bearer token for acc
         scope: "write"
       });
     }
-    if (parsedUrl.pathname === "/user") {
+    if (path === "/user") {
       assert.equal(options.headers.Authorization, "Bearer access-token");
-      return json({ id: 123, name: "test-user" });
+      return json({ user_id: 123, username: "test-user" });
     }
-    assert.fail(`Unexpected MDBList request: ${parsedUrl.pathname}`);
+    assert.fail(`Unexpected MDBList request: ${path}`);
   };
 
   try {
@@ -96,7 +103,7 @@ test("MDBList account disconnect clears account credentials", async () => {
   );
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    assert.equal(new URL(String(url)).pathname, "/oauth/revoke_token/");
+    assert.equal(mdblistPath(url), "/oauth/revoke_token/");
     return json({ success: true });
   };
 
@@ -125,7 +132,7 @@ test("MDBList refreshes the access token once for concurrent callers", async () 
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (url, options) => {
-    requests.push({ path: new URL(String(url)).pathname, options });
+    requests.push({ path: mdblistPath(url), options });
     await new Promise((resolve) => setTimeout(resolve, 20));
     return json({
       access_token: "new-access-token",
@@ -153,7 +160,7 @@ test("cancelling an in-flight MDBList device poll prevents stale credentials fro
   const originalFetch = globalThis.fetch;
   let releaseTokenResponse;
   globalThis.fetch = async (url) => {
-    const path = new URL(String(url)).pathname;
+    const path = mdblistPath(url);
     if (path === "/oauth/device-authorization/") {
       return json({
         device_code: "device-token",

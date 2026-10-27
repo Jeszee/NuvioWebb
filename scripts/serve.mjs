@@ -1,4 +1,5 @@
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
@@ -25,6 +26,7 @@ const externalReturnHandler = createExternalReturnHandler();
 // so Trakt sign-in could be exercised in a container and nowhere else -- which
 // is a poor place to find out that the bridge refuses every request.
 const traktAuthBridgeHandler = createTraktAuthBridgeHandler();
+const MDBLIST_API_HOST = "api.mdblist.com";
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -198,9 +200,62 @@ async function proxyLocalMediaRequest(request, response, pathname) {
   return true;
 }
 
+function proxyMdbListRequest(request, response, requestUrl) {
+  const pathname = requestUrl.pathname.slice("/api/mdblist".length);
+  if (!["GET", "POST", "PUT", "DELETE"].includes(request.method || "")) {
+    response.writeHead(405, {
+      Allow: "GET, POST, PUT, DELETE",
+      "Content-Type": "application/json; charset=utf-8"
+    });
+    response.end(JSON.stringify({ error: "MDBList API method is not allowed" }));
+    return;
+  }
+  if (!pathname.startsWith("/")) {
+    response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: "Invalid MDBList API path" }));
+    return;
+  }
+  const headers = {
+    host: MDBLIST_API_HOST,
+    accept: request.headers.accept || "application/json",
+    ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
+    ...(request.headers["content-type"] ? { "content-type": request.headers["content-type"] } : {})
+  };
+  const upstream = https.request(
+    {
+      hostname: MDBLIST_API_HOST,
+      method: request.method,
+      path: `${pathname}${requestUrl.search}`,
+      headers,
+      timeout: 50_000
+    },
+    (upstreamResponse) => {
+      response.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+      upstreamResponse.pipe(response);
+    }
+  );
+  upstream.on("timeout", () => upstream.destroy(new Error("MDBList request timed out")));
+  upstream.on("error", (error) => {
+    if (response.headersSent) {
+      response.destroy(error);
+      return;
+    }
+    response.writeHead(502, {
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json; charset=utf-8"
+    });
+    response.end(JSON.stringify({ error: "MDBList connection failed" }));
+  });
+  request.pipe(upstream);
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const requestUrl = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+    if (requestUrl.pathname.startsWith("/api/mdblist/")) {
+      proxyMdbListRequest(request, response, requestUrl);
+      return;
+    }
     if (requestUrl.pathname.startsWith("/api/debrid/")) {
       await debridApiBridgeHandler(request, response);
       return;

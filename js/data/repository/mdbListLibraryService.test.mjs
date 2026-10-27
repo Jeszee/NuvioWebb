@@ -34,7 +34,7 @@ test("MDBList imports the watchlist and personal lists, then serves them from ca
   MdbListAccount.isAuthenticated = () => true;
   MdbListAccount.api = async (path, options = {}) => {
     requests.push(path);
-    if (path === "/user") return { payload: { id: 123 } };
+    if (path === "/user") return { payload: { user_id: 123 } };
     if (path === "/lists/user") {
       return {
         payload: [
@@ -113,14 +113,19 @@ test("MDBList imports the watchlist and personal lists, then serves them from ca
   }
 });
 
-test("MDBList item identity normalization does not mutate caller IDs", async () => {
+test("MDBList adds a series to the watchlist with provider IDs", async () => {
   storage.clear();
   const originalApi = MdbListAccount.api;
   const originalIsAuthenticated = MdbListAccount.isAuthenticated;
-  const item = { itemType: "movie", itemId: "tmdb:42", ids: { imdb: "tt1234567" } };
+  const item = {
+    itemType: "series",
+    itemId: "tt1234567",
+    ids: { imdb: "tt1234567", tmdb: 42 }
+  };
   MdbListAccount.isAuthenticated = () => true;
+  let mutationRequests = 0;
   MdbListAccount.api = async (path, options) => {
-    if (path === "/user") return { payload: { id: 123 } };
+    if (path === "/user") return { payload: { user_id: 123 } };
     if (path === "/lists/user") return { payload: [] };
     if (path === "/external/lists/user") return { payload: [] };
     if (path === "/lists/liked") return { payload: { lists: [] } };
@@ -128,15 +133,16 @@ test("MDBList item identity normalization does not mutate caller IDs", async () 
       return { payload: [], headers: new Headers() };
     }
     if (path === "/watchlist/items/add") {
+      mutationRequests += 1;
       assert.deepEqual(options.body, {
-        movies: [{ ids: { imdb: "tt1234567", tmdb: 42 } }]
+        shows: [{ imdb: "tt1234567", tmdb: 42 }]
       });
       return {
         payload: {
-          added: { movies: 1 },
-          existing: { movies: 0 },
-          removed: { movies: 0 },
-          not_found: { movies: 0 }
+          added: { shows: 1 },
+          existing: { shows: 0 },
+          removed: { shows: 0 },
+          not_found: { shows: 0 }
         }
       };
     }
@@ -147,7 +153,51 @@ test("MDBList item identity normalization does not mutate caller IDs", async () 
     await MdbListLibraryService.applyMembershipChanges(item, {
       desiredMembership: { "mdblist:watchlist": true }
     });
-    assert.deepEqual(item.ids, { imdb: "tt1234567" });
+    assert.equal(mutationRequests, 1);
+    assert.deepEqual(item.ids, { imdb: "tt1234567", tmdb: 42 });
+  } finally {
+    MdbListAccount.api = originalApi;
+    MdbListAccount.isAuthenticated = originalIsAuthenticated;
+    storage.clear();
+  }
+});
+
+test("MDBList manual refresh fetches additions made on the website", async () => {
+  storage.clear();
+  const originalApi = MdbListAccount.api;
+  const originalIsAuthenticated = MdbListAccount.isAuthenticated;
+  let watchlist = [];
+  let watchlistRequests = 0;
+  MdbListAccount.isAuthenticated = () => true;
+  MdbListAccount.api = async (path) => {
+    if (path === "/user") return { payload: { user_id: 123 } };
+    if (path === "/lists/user") return { payload: [] };
+    if (path === "/external/lists/user") return { payload: [] };
+    if (path === "/lists/liked") return { payload: { lists: [] } };
+    if (path === "/watchlist/items") {
+      watchlistRequests += 1;
+      return { payload: watchlist, headers: new Headers() };
+    }
+    assert.fail(`Unexpected MDBList API request: ${path}`);
+  };
+
+  try {
+    assert.deepEqual(await MdbListLibraryService.getEntries(), []);
+    watchlist = [
+      {
+        mediatype: "show",
+        ids: { imdb: "tt7654321" },
+        title: "Website addition"
+      }
+    ];
+    assert.deepEqual(await MdbListLibraryService.getEntries(), []);
+    assert.equal(watchlistRequests, 1);
+
+    assert.equal(await MdbListLibraryService.refreshNow(), true);
+    const entries = await MdbListLibraryService.getEntries();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].name, "Website addition");
+    assert.equal(watchlistRequests, 2);
   } finally {
     MdbListAccount.api = originalApi;
     MdbListAccount.isAuthenticated = originalIsAuthenticated;

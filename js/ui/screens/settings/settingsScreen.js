@@ -8897,6 +8897,18 @@ export const SettingsScreen = {
       this.desktopMdbListStatusMessage = null;
       this.desktopMdbListErrorMessage = null;
     });
+    this.actionMap.set("tracking:desktop:mdblist:refresh", async () => {
+      this.desktopMdbListStatusMessage = "Syncing MDBList...";
+      this.desktopMdbListErrorMessage = null;
+      try {
+        await MdbListLibraryService.refreshNow();
+        this.desktopMdbListStatusMessage = "MDBList sync completed. Reopen Library to see updates.";
+      } catch (error) {
+        this.desktopMdbListStatusMessage = null;
+        this.desktopMdbListErrorMessage = String(error?.message || error);
+      }
+      await this.render();
+    });
     this.actionMap.set("tracking:desktop:mdblist:disconnect", () => {
       this.openOptionDialog({
         title: "Disconnect MDBList?",
@@ -9043,7 +9055,11 @@ export const SettingsScreen = {
            ${inlineButton("tracking:desktop:simkl:connect", "Connect Simkl")}`;
     const mdblistBody = mdblistConnected
       ? `<p class="settings-tracking-provider-status">Connected as ${escapeHtml(mdblist.username || "MDBList user")}</p>
-         ${inlineButton("tracking:desktop:mdblist:disconnect", "Disconnect", "is-danger")}`
+         <div class="settings-tracking-inline-actions">
+           ${inlineButton("tracking:desktop:mdblist:refresh", "Refresh")}
+           ${inlineButton("tracking:desktop:mdblist:disconnect", "Disconnect", "is-danger")}
+         </div>
+         ${this.desktopMdbListStatusMessage ? `<p class="settings-tracking-provider-status">${escapeHtml(this.desktopMdbListStatusMessage)}</p>` : ""}`
       : mdblistWaiting
         ? `<div class="settings-tracking-activation">
              <div class="settings-row-title">Enter this code on MDBList</div>

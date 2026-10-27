@@ -6,7 +6,9 @@ const STORE_KEY = "mdbListAccounts";
 const LIBRARY_KEY = "mdbListLibraries";
 const RATE_LIMIT_MS = 60 * 1000;
 const REQUEST_GAP_MS = 1000;
+const REQUEST_TIMEOUT_MS = 45 * 1000;
 const API_BASE_URL = String(MDBLIST_API_BASE_URL || "https://api.mdblist.com/").replace(/\/+$/, "");
+const API_PROXY_PATH = "/api/mdblist";
 
 let requestQueue = Promise.resolve();
 let nextRequestAt = 0;
@@ -36,13 +38,31 @@ function clearLibrary(id) {
 }
 
 function error(code, status = 0) {
-  return Object.assign(new Error(code), { code, status });
+  const message =
+    code === "mdblist_connection_failed"
+      ? "Could not connect to MDBList. Check your connection and try again."
+      : code === "mdblist_rate_limited"
+        ? "MDBList rate limit reached. Please wait before trying again."
+        : code === "mdblist_invalid_response"
+          ? "MDBList returned an invalid response."
+          : code;
+  return Object.assign(new Error(message), { code, status });
 }
 
 function apiUrl(path, query = {}) {
   if (!/^\/(?!\/)[^?#]*$/.test(path)) throw error("mdblist_invalid_response");
-  const url = new URL(path, `${API_BASE_URL}/`);
-  if (url.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+  const browserLocation = globalThis.location;
+  const useBrowserProxy = Boolean(
+    browserLocation?.origin && /^https?:$/.test(browserLocation.protocol)
+  );
+  const url = useBrowserProxy
+    ? new URL(`${API_PROXY_PATH}${path}`, browserLocation.origin)
+    : new URL(path, `${API_BASE_URL}/`);
+  if (
+    !useBrowserProxy &&
+    url.protocol !== "https:" &&
+    !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+  ) {
     throw error("mdblist_invalid_response");
   }
   Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, String(value)));
@@ -65,39 +85,53 @@ async function request(
     if (accessToken) headers.Authorization = "Bearer " + accessToken;
     if (form) headers["Content-Type"] = "application/x-www-form-urlencoded";
     if (body != null) headers["Content-Type"] = "application/json";
+    const url = apiUrl(path, query).href;
     let response;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
     try {
-      response = await fetch(apiUrl(path, query).href, {
+      response = await fetch(url, {
         method,
         headers,
         redirect: "error",
+        ...(controller ? { signal: controller.signal } : {}),
         ...(form
           ? { body: new URLSearchParams(form).toString() }
           : body != null
             ? { body: JSON.stringify(body) }
             : {})
       });
+    } catch (cause) {
+      if (timeout) clearTimeout(timeout);
+      nextRequestAt = Date.now() + REQUEST_GAP_MS;
+      throw Object.assign(error("mdblist_connection_failed"), { cause });
+    }
+    try {
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        const delay = /^\d+$/.test(retryAfter || "") ? Number(retryAfter) * 1000 : RATE_LIMIT_MS;
+        cooldownUntil = Date.now() + Math.max(delay, 1000);
+        throw Object.assign(error("mdblist_rate_limited", 429), {
+          retryAfterMs: cooldownUntil - Date.now()
+        });
+      }
+      const text = await response.text();
+      let payload = null;
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          if (response.ok) throw error("mdblist_invalid_response");
+        }
+      }
+      return { status: response.status, payload, headers: response.headers };
+    } catch (cause) {
+      if (cause?.code) throw cause;
+      throw Object.assign(error("mdblist_connection_failed"), { cause });
     } finally {
+      if (timeout) clearTimeout(timeout);
       nextRequestAt = Date.now() + REQUEST_GAP_MS;
     }
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("Retry-After");
-      const delay = /^\d+$/.test(retryAfter || "") ? Number(retryAfter) * 1000 : RATE_LIMIT_MS;
-      cooldownUntil = Date.now() + Math.max(delay, 1000);
-      throw Object.assign(error("mdblist_rate_limited", 429), {
-        retryAfterMs: cooldownUntil - Date.now()
-      });
-    }
-    const text = await response.text();
-    let payload = null;
-    if (text) {
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        if (response.ok) throw error("mdblist_invalid_response");
-      }
-    }
-    return { status: response.status, payload, headers: response.headers };
   };
   const task = requestQueue.then(run, run);
   requestQueue = task.catch(() => {});
@@ -229,10 +263,11 @@ export const MdbListAccount = {
       saveAccount(id, { tokens, user: null, device: null, generation: Date.now() });
       clearLibrary(id);
       const { payload: user } = await this.api("/user", { profileId: id });
-      if (Number.isSafeInteger(Number(user?.id)) && Number(user.id) > 0) {
+      const userId = Number(user?.user_id ?? user?.id);
+      if (Number.isSafeInteger(userId) && userId > 0) {
         saveAccount(id, {
           ...accountFor(id),
-          user: { id: Number(user.id), name: String(user.name || user.username || "") }
+          user: { id: userId, name: String(user.name || user.username || "") }
         });
       }
       return { type: "approved", username: accountFor(id).user?.name || null };
@@ -315,7 +350,18 @@ export const MdbListAccount = {
         continue;
       }
       if (result.status < 200 || result.status >= 300) {
-        throw Object.assign(error("mdblist_request_failed", result.status), {
+        const detail = String(
+          result.payload?.error_description ||
+            result.payload?.message ||
+            result.payload?.error ||
+            ""
+        ).trim();
+        const message = detail
+          ? `MDBList request failed (HTTP ${result.status}): ${detail}`
+          : `MDBList request failed (HTTP ${result.status})`;
+        throw Object.assign(new Error(message), {
+          code: "mdblist_request_failed",
+          status: result.status,
           payload: result.payload
         });
       }
