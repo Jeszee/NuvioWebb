@@ -476,8 +476,8 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
           id === "simkl"
             ? "assets/icons/simkl_tv_glyph.svg"
             : id === "mdblist"
-              ? "assets/icons/mdblist_trakt.svg"
-              : "assets/icons/trakt_tv_glyph.svg",
+              ? "assets/icons/mdblist_logo.svg"
+              : "assets/icons/trakt_tv_favicon.svg",
         title,
         subtitle: connected
           ? id === "mdblist"

@@ -3852,6 +3852,51 @@ export const SettingsScreen = {
     `;
   },
 
+  renderTrackingProviderCard({ id, connected, waiting, username, expanded, bodyHtml }) {
+    const focusKey = `tracking:desktop:${id}`;
+    const brand = {
+      trakt: {
+        logo: "assets/icons/trakt_logo_wordmark.svg",
+        mark: "assets/icons/trakt_tv_favicon.svg"
+      },
+      simkl: {
+        logo: "assets/icons/simkl_logo_wordmark.svg",
+        mark: "assets/icons/simkl_logo_glyph.svg"
+      },
+      mdblist: { logo: "assets/icons/mdblist_logo.svg", mark: "assets/icons/mdblist_logo.svg" }
+    }[id];
+    const name = { trakt: "Trakt", simkl: "Simkl", mdblist: "MDBList" }[id];
+    const status = connected
+      ? t(
+          "tracking_card_connected_as",
+          [username || t("tracking_card_user_fallback", [name], `${name} user`)],
+          `Connected as ${username || `${name} user`}`
+        )
+      : waiting
+        ? t("tracking_status_waiting", {}, "Waiting for approval")
+        : t("tracking_status_disconnected", {}, "Not connected");
+    const logoHtml =
+      id === "mdblist"
+        ? `<img class="settings-provider-logo is-mark" src="${brand.logo}" alt="" draggable="false"><span class="settings-provider-name">${name}</span>`
+        : `<img class="settings-provider-logo is-${id}" src="${brand.logo}" alt="${name}" draggable="false">`;
+    return `
+      <div class="settings-provider-card is-${id}${expanded ? " is-open" : ""}">
+        <img class="settings-provider-watermark" src="${brand.mark}" alt="" aria-hidden="true" draggable="false">
+        <button class="settings-provider-header settings-content-focusable focusable"
+                data-zone="content"
+                ${this.registerAction(focusKey, this.actionMap.get(focusKey))}
+                aria-expanded="${expanded ? "true" : "false"}"
+                aria-label="${escapeHtml(`${name} - ${status}`)}"
+                data-role="section-toggle">
+          <span class="settings-provider-heading">${logoHtml}</span>
+          ${iconSvg(expanded ? ROW_ICONS.expand : ROW_ICONS.chevron, "settings-provider-chevron")}
+          <span class="settings-provider-status">${escapeHtml(status)}</span>
+        </button>
+        ${expanded ? `<div class="settings-provider-body">${bodyHtml}</div>` : ""}
+      </div>
+    `;
+  },
+
   renderAccountSection(model) {
     const signedIn = model.authState === "authenticated";
     const loading = model.authState === "loading";
@@ -9140,6 +9185,15 @@ export const SettingsScreen = {
       });
     });
     this.actionMap.set("tracking:desktop:trakt:disconnect", () => this.openTraktDisconnectDialog());
+    this.actionMap.set("tracking:desktop:trakt:visit", () =>
+      window.open?.("https://trakt.tv", "_blank", "noopener,noreferrer")
+    );
+    this.actionMap.set("tracking:desktop:simkl:visit", () =>
+      window.open?.("https://simkl.com", "_blank", "noopener,noreferrer")
+    );
+    this.actionMap.set("tracking:desktop:mdblist:visit", () =>
+      window.open?.("https://mdblist.com", "_blank", "noopener,noreferrer")
+    );
     this.actionMap.set("tracking:desktop:library", () => {
       this.openOptionDialog({
         title: "Library source",
@@ -9208,67 +9262,88 @@ export const SettingsScreen = {
       <button class="settings-tracking-inline-button settings-content-focusable focusable${classes ? ` ${classes}` : ""}"
               data-zone="content"
               ${this.registerAction(focusKey, this.actionMap.get(focusKey))}>${escapeHtml(label)}</button>`;
+    const providerName = { trakt: "Trakt", simkl: "Simkl", mdblist: "MDBList" };
+    const linkButton = (focusKey, label) => inlineButton(focusKey, label, "is-link");
+    const primaryButton = (focusKey, label) => inlineButton(focusKey, label, "is-primary");
+    const providerDescription = (text) =>
+      `<p class="settings-provider-description">${escapeHtml(text)}</p>`;
+    const providerMessage = (message) =>
+      message ? `<p class="settings-tracking-provider-status">${escapeHtml(message)}</p>` : "";
+    const activationCard = ({ id, code, url, statusMessage }) => `
+      <div class="settings-tracking-activation">
+        <div class="settings-row-title">${escapeHtml(t("tracking_card_enter_code", [providerName[id]], `Enter this code on ${providerName[id]}`))}</div>
+        <p class="settings-row-subtitle">${escapeHtml(t("tracking_card_code_help", [providerName[id]], `Open the ${providerName[id]} activation page and enter this code to approve Nuvio. This section updates automatically.`))}</p>
+        <code class="settings-tracking-activation-code">${escapeHtml(code || "-")}</code>
+        <div class="settings-tracking-activation-url">${escapeHtml(url)}</div>
+        <div class="settings-provider-actions">
+          ${primaryButton(`tracking:desktop:${id}:open`, t("tracking_card_open", [providerName[id]], `Open ${providerName[id]}`))}
+          <div class="settings-provider-links">
+            ${linkButton(`tracking:desktop:${id}:cancel`, t("tracking_card_cancel", {}, "Cancel"))}
+          </div>
+        </div>
+        ${providerMessage(statusMessage || t("tracking_card_waiting_for", [providerName[id]], `Waiting for ${providerName[id]} approval...`))}
+      </div>`;
+    const providerActions = (id, connected, primaryKey, primaryLabel) => `
+      <div class="settings-provider-actions">
+        ${primaryKey ? primaryButton(primaryKey, primaryLabel) : ""}
+        <div class="settings-provider-links">
+          ${linkButton(`tracking:desktop:${id}:visit`, t("tracking_card_visit", [providerName[id]], `Visit ${providerName[id]}`))}
+          ${connected ? linkButton(`tracking:desktop:${id}:disconnect`, t("tracking_card_disconnect", {}, "Disconnect")) : ""}
+        </div>
+      </div>`;
+    const connectLabel = (id) =>
+      t("tracking_card_connect", [providerName[id]], `Connect ${providerName[id]}`);
+    const syncLabel = t("tracking_card_sync_now", {}, "Sync now");
     const activationUrl = String(simkl.verificationUrl || "").trim();
     const simklBody = simklConnected
-      ? `<p class="settings-tracking-provider-status">Connected as ${escapeHtml(simkl.username || "Simkl user")}</p>
-         <div class="settings-tracking-inline-actions">
-           ${inlineButton("tracking:desktop:simkl:refresh", "Refresh")}
-           ${inlineButton("tracking:desktop:simkl:disconnect", "Disconnect", "is-danger")}
-         </div>`
+      ? `${providerDescription(t("simkl_description", {}, "Connect Simkl to sync lists, watched history, playback progress, and scrobbles."))}
+         ${providerActions("simkl", true, "tracking:desktop:simkl:refresh", syncLabel)}
+         ${providerMessage(this.desktopSimklStatusMessage)}`
       : simklWaiting
-        ? `<div class="settings-tracking-activation">
-             <div class="settings-row-title">Enter this code on Simkl</div>
-             <p class="settings-row-subtitle">Open the Simkl activation page and enter this code to approve Nuvio. This section updates automatically.</p>
-             <code class="settings-tracking-activation-code">${escapeHtml(simkl.userCode || "-")}</code>
-             <div class="settings-tracking-activation-url">${escapeHtml(activationUrl)}</div>
-             <div class="settings-tracking-inline-actions">
-               ${inlineButton("tracking:desktop:simkl:open", "Open Simkl activation")}
-               ${inlineButton("tracking:desktop:simkl:cancel", "Cancel", "is-secondary")}
-             </div>
-             <p class="settings-tracking-provider-status">${escapeHtml(this.desktopSimklStatusMessage || "Waiting for Simkl approval...")}</p>
-           </div>`
-        : `<p class="settings-row-subtitle">Connect Simkl to sync lists, watched history, playback progress, and scrobbles.</p>
-           ${inlineButton("tracking:desktop:simkl:connect", "Connect Simkl")}`;
+        ? activationCard({
+            id: "simkl",
+            code: simkl.userCode,
+            url: activationUrl,
+            statusMessage: this.desktopSimklStatusMessage
+          })
+        : `${providerDescription(t("simkl_description", {}, "Connect Simkl to sync lists, watched history, playback progress, and scrobbles."))}
+           ${providerActions("simkl", false, "tracking:desktop:simkl:connect", connectLabel("simkl"))}`;
     const mdblistBody = mdblistConnected
-      ? `<p class="settings-tracking-provider-status">Connected as ${escapeHtml(mdblist.username || "MDBList user")}</p>
-         <div class="settings-tracking-inline-actions">
-           ${inlineButton("tracking:desktop:mdblist:refresh", "Refresh")}
-           ${inlineButton("tracking:desktop:mdblist:disconnect", "Disconnect", "is-danger")}
-         </div>
-         ${this.desktopMdbListStatusMessage ? `<p class="settings-tracking-provider-status">${escapeHtml(this.desktopMdbListStatusMessage)}</p>` : ""}`
+      ? `${providerDescription(t("tracking_card_mdblist_description", {}, "Connect MDBList to use its watchlist and personal lists as your Library."))}
+         ${providerActions("mdblist", true, "tracking:desktop:mdblist:refresh", syncLabel)}
+         ${providerMessage(this.desktopMdbListStatusMessage)}`
       : mdblistWaiting
-        ? `<div class="settings-tracking-activation">
-             <div class="settings-row-title">Enter this code on MDBList</div>
-             <p class="settings-row-subtitle">Open MDBList authorization and enter this code to approve Nuvio.</p>
-             <code class="settings-tracking-activation-code">${escapeHtml(mdblist.userCode || "-")}</code>
-             <div class="settings-tracking-activation-url">${escapeHtml(mdblist.verificationUrl || "https://mdblist.com/oauth/device")}</div>
-             <div class="settings-tracking-inline-actions">
-               ${inlineButton("tracking:desktop:mdblist:open", "Open MDBList")}
-               ${inlineButton("tracking:desktop:mdblist:cancel", "Cancel", "is-secondary")}
-             </div>
-             <p class="settings-tracking-provider-status">${escapeHtml(this.desktopMdbListStatusMessage || "Waiting for MDBList approval...")}</p>
-           </div>`
-        : `<p class="settings-row-subtitle">Connect MDBList to use its watchlist and personal lists as your Library.</p>
-           ${inlineButton("tracking:desktop:mdblist:connect", "Connect MDBList")}`;
+        ? activationCard({
+            id: "mdblist",
+            code: mdblist.userCode,
+            url: mdblist.verificationUrl || "https://mdblist.com/oauth/device",
+            statusMessage: this.desktopMdbListStatusMessage
+          })
+        : `${providerDescription(t("tracking_card_mdblist_description", {}, "Connect MDBList to use its watchlist and personal lists as your Library."))}
+           ${providerActions("mdblist", false, "tracking:desktop:mdblist:connect", connectLabel("mdblist"))}`;
+    const traktDescription = providerDescription(
+      t(
+        "trakt_description",
+        {},
+        "Sync your watchlist, watch progress, continue watching, scrobbles, and personal lists with Trakt."
+      )
+    );
     const traktBody = traktConnected
-      ? `<p class="settings-tracking-provider-status">Connected as ${escapeHtml(trakt.username || "Trakt user")}</p>
-         ${inlineButton("tracking:desktop:trakt:disconnect", "Disconnect", "is-danger")}`
+      ? `${traktDescription}
+         ${providerActions("trakt", true, "", "")}
+         ${providerMessage(this.desktopTraktStatusMessage)}`
       : traktWaiting
-        ? `<div class="settings-tracking-activation">
-             <div class="settings-row-title">Enter this code on Trakt</div>
-             <p class="settings-row-subtitle">Open Trakt activation and enter this code to approve Nuvio.</p>
-             <code class="settings-tracking-activation-code">${escapeHtml(trakt.userCode || "-")}</code>
-             <div class="settings-tracking-activation-url">${escapeHtml(trakt.verificationUrl || "https://trakt.tv/activate")}</div>
-             <div class="settings-tracking-inline-actions">
-               ${inlineButton("tracking:desktop:trakt:open", "Open Trakt")}
-               ${inlineButton("tracking:desktop:trakt:cancel", "Cancel", "is-secondary")}
-             </div>
-             <p class="settings-tracking-provider-status">${escapeHtml(this.desktopTraktStatusMessage || "Waiting for Trakt approval...")}</p>
-           </div>`
+        ? activationCard({
+            id: "trakt",
+            code: trakt.userCode,
+            url: trakt.verificationUrl || "https://trakt.tv/activate",
+            statusMessage: this.desktopTraktStatusMessage
+          })
         : traktBridgeStatus === "unavailable" || !TraktAuthService.hasRequiredCredentials()
-          ? `<p class="settings-row-subtitle">Trakt browser authentication is unavailable on this server.</p>`
-          : `<p class="settings-row-subtitle">Connect Trakt to sync lists, watched history, playback progress, and scrobbles.</p>
-             ${inlineButton("tracking:desktop:trakt:connect", "Connect Trakt")}`;
+          ? `${traktDescription}
+             ${providerMessage(t("tracking_card_trakt_unavailable", {}, "Trakt browser authentication is unavailable on this server."))}`
+          : `${traktDescription}
+             ${providerActions("trakt", false, "tracking:desktop:trakt:connect", connectLabel("trakt"))}`;
     const behaviorBody = `
       ${this.renderActionRow({ focusKey: "tracking:desktop:library", title: "Library source", subtitle: "Choose the service Nuvio reads for your Library.", value: librarySources.find((item) => item.id === settings.librarySourceMode)?.label || "Nuvio" })}
       ${this.renderActionRow({ focusKey: "tracking:desktop:progress", title: "Watch progress source", subtitle: "Choose the service Nuvio reads for resume and Continue Watching.", value: progressSources.find((item) => item.id === settings.watchProgressSource)?.label || "Nuvio Sync" })}
@@ -9282,9 +9357,9 @@ export const SettingsScreen = {
       ${this.renderSectionHeader(SECTION_META.find((item) => item.id === "trakt"))}
       <div class="settings-group-card settings-group-card-fill">
         <div class="settings-stack settings-desktop-tracking-stack">
-          ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:trakt", title: "Trakt", subtitle: traktConnected ? `Connected as ${trakt.username || "Trakt user"}` : traktWaiting ? "Waiting for approval" : traktBridgeStatus === "unavailable" ? "Unavailable on this server" : "Not connected", expanded: Boolean(expanded.trakt), bodyHtml: expanded.trakt ? `${traktBody}${this.desktopTraktErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopTraktErrorMessage)}</p>` : ""}` : "", classes: "settings-collapsible-tracking" })}
-          ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:simkl", title: "Simkl", subtitle: simklConnected ? `Connected as ${simkl.username || "Simkl user"}` : simklWaiting ? "Waiting for approval" : "Not connected", expanded: Boolean(expanded.simkl), bodyHtml: expanded.simkl ? `${simklBody}${this.desktopSimklErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopSimklErrorMessage)}</p>` : ""}` : "", classes: "settings-collapsible-tracking" })}
-          ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:mdblist", title: "MDBList", subtitle: mdblistConnected ? `Connected as ${mdblist.username || "MDBList user"}` : mdblistWaiting ? "Waiting for approval" : "Not connected", expanded: Boolean(expanded.mdblist), bodyHtml: expanded.mdblist ? `${mdblistBody}${this.desktopMdbListErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopMdbListErrorMessage)}</p>` : ""}` : "", classes: "settings-collapsible-tracking" })}
+          ${this.renderTrackingProviderCard({ id: "trakt", connected: traktConnected, waiting: traktWaiting, username: trakt.username, expanded: Boolean(expanded.trakt), bodyHtml: `${traktBody}${this.desktopTraktErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopTraktErrorMessage)}</p>` : ""}` })}
+          ${this.renderTrackingProviderCard({ id: "simkl", connected: simklConnected, waiting: simklWaiting, username: simkl.username, expanded: Boolean(expanded.simkl), bodyHtml: `${simklBody}${this.desktopSimklErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopSimklErrorMessage)}</p>` : ""}` })}
+          ${this.renderTrackingProviderCard({ id: "mdblist", connected: mdblistConnected, waiting: mdblistWaiting, username: mdblist.username, expanded: Boolean(expanded.mdblist), bodyHtml: `${mdblistBody}${this.desktopMdbListErrorMessage ? `<p class="settings-tracking-error">${escapeHtml(this.desktopMdbListErrorMessage)}</p>` : ""}` })}
           ${this.renderCollapsibleRow({ focusKey: "tracking:desktop:behavior", title: "Sources & Behavior", subtitle: "Choose the sources used for Library, progress, and related content.", expanded: Boolean(expanded.behavior), bodyHtml: expanded.behavior ? behaviorBody : "", classes: "settings-collapsible-tracking" })}
         </div>
       </div>

@@ -1201,4 +1201,21 @@
     <string name="cloud_library_error_provider_unavailable">Cloudbibliotheek is niet beschikbaar voor %1$s.</string>
     <string name="cloud_library_error_disabled">Cloudbibliotheek is uitgeschakeld.</string>
     <string name="cloud_library_search_clear">Duidelijke zoekopdracht</string>
+    <string name="tracking_status_connected">Verbonden</string>
+    <string name="tracking_status_disconnected">Niet verbonden</string>
+    <string name="tracking_status_waiting">Wachten op goedkeuring</string>
+    <string name="tracking_card_connect">%1$s verbinden</string>
+    <string name="tracking_card_visit">%1$s bezoeken</string>
+    <string name="tracking_card_open">%1$s openen</string>
+    <string name="tracking_card_disconnect">Loskoppelen</string>
+    <string name="tracking_card_cancel">Annuleren</string>
+    <string name="tracking_card_sync_now">Nu synchroniseren</string>
+    <string name="tracking_card_connected_as">Verbonden als %1$s</string>
+    <string name="tracking_card_enter_code">Voer deze code in op %1$s</string>
+    <string name="tracking_card_code_help">Open de activatiepagina van %1$s en voer deze code in om Nuvio goed te keuren. Dit onderdeel wordt automatisch bijgewerkt.</string>
+    <string name="tracking_card_waiting_for">Wachten op goedkeuring van %1$s...</string>
+    <string name="tracking_card_trakt_unavailable">Trakt-authenticatie via de browser is niet beschikbaar op deze server.</string>
+    <string name="tracking_card_mdblist_description">Verbind MDBList om je kijklijst en persoonlijke lijsten als bibliotheek te gebruiken.</string>
+    <string name="tracking_card_user_fallback">%1$s-gebruiker</string>
+    <string name="simkl_description">Verbind Simkl om lijsten, kijkgeschiedenis, afspeelvoortgang en scrobbelen te synchroniseren.</string>
 </resources>
