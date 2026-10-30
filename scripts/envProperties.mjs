@@ -156,15 +156,8 @@ export function buildRuntimeEnvScript(env = {}) {
 `;
 }
 
-export async function writeRuntimeEnvScriptFile(
-  targetPath,
-  { rootDir, sourcePath = "" } = {}
-) {
+export async function writeRuntimeEnvScriptFile(targetPath, { rootDir, sourcePath = "" } = {}) {
   const result = await readEnvProperties({ rootDir, sourcePath });
-  await writeFile(
-    targetPath,
-    buildRuntimeEnvScript(result.env),
-    "utf8"
-  );
+  await writeFile(targetPath, buildRuntimeEnvScript(result.env), "utf8");
   return result;
 }
