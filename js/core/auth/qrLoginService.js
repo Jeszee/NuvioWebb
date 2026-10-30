@@ -406,9 +406,6 @@ export const QrLoginService = {
       return {
         code: session.code,
         loginUrl: session.qr_content || session.web_url || null,
-        qrImageUrl:
-          session.qr_image_url ||
-          `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(session.qr_content || session.web_url || "")}`,
         expiresAt: toEpochMillis(session),
         pollIntervalSeconds: Number(session.poll_interval_seconds || 3),
         deviceNonce

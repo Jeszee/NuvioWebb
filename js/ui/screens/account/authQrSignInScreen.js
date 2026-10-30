@@ -5,6 +5,7 @@ import { ScreenUtils } from "../../navigation/screen.js";
 import { AuthManager } from "../../../core/auth/authManager.js";
 import { I18n } from "../../../i18n/index.js";
 import { Platform } from "../../../platform/index.js";
+import { QrCodeGenerator } from "../../../core/qr/qrCodeGenerator.js";
 
 let pollInterval = null;
 let countdownInterval = null;
@@ -123,7 +124,13 @@ export const AuthQrSignInScreen = {
         return;
       }
 
-      this.renderQr(result);
+      try {
+        this.renderQr(result);
+      } catch (error) {
+        console.error("QR code rendering failed:", error);
+        this.setStatus(this.toFriendlyQrError(error?.message));
+        return;
+      }
       this.setStatus(I18n.t("auth.qr.scanAndSignIn"));
       this.startPolling(
         result.code,
@@ -139,7 +146,7 @@ export const AuthQrSignInScreen = {
     }
   },
 
-  renderQr({ qrImageUrl, code }) {
+  renderQr({ loginUrl, code }) {
     const qrContainer = this.container?.querySelector("#qr-container");
     const codeText = this.container?.querySelector("#qr-code-text");
 
@@ -147,9 +154,17 @@ export const AuthQrSignInScreen = {
       return;
     }
 
-    qrContainer.innerHTML = `
-      <img src="${qrImageUrl}" class="qr-image" alt="${I18n.t("auth.qr.qrImageAlt")}" />
-    `;
+    const qrContent = String(loginUrl || "").trim();
+    if (!qrContent) {
+      throw new Error("QR login response did not include a QR URL");
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "qr-image qr-image-canvas";
+    canvas.setAttribute("aria-label", I18n.t("auth.qr.qrImageAlt"));
+    QrCodeGenerator.generate(canvas, qrContent, 512);
+    qrContainer.innerHTML = "";
+    qrContainer.appendChild(canvas);
 
     codeText.innerText = I18n.t("auth.qr.codeLabel", { code });
   },
