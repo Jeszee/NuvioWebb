@@ -2224,7 +2224,9 @@ html.desktop-browser {
 }
 
 .desktop-browser #detail .series-detail-vignette {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.08) 42%, var(--detail-bg) 100%);
+  background:
+    linear-gradient(90deg, rgba(4, 7, 11, 0.62) 0%, rgba(8, 12, 17, 0.4) 40%, rgba(8, 12, 17, 0.12) 70%, rgba(8, 12, 17, 0) 100%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.08) 42%, var(--detail-bg) 100%);
 }
 
 .desktop-browser #detail .detail-bottom-shadow {
