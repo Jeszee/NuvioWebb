@@ -34,64 +34,26 @@ initial fork already provided the browser/PWA client, Stremio addon discovery
 and playback, responsive layouts, offline-capable PWA behavior, local saved
 library support, and the original provider integration surfaces.
 
-Compared with that initial fork snapshot, this repository now adds and
-strengthens the following functionality:
+The table below summarizes the user-visible differences from the upstream
+`web` branch. It covers fork-specific additions and changes; the browser/PWA
+client, Stremio addon discovery, and playback are inherited from upstream.
 
-### Library sources and synchronization
+| Area                               | Change             | What this fork adds or changes                                                                                                                |
+| ---------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| TVDB metadata                      | Added              | Optional profile-scoped series/episode metadata. Fills fields missing after catalog/add-on and TMDB data; does not provide watch progress.    |
+| MDBList library                    | Added              | Device-code auth, cached watchlist and personal-list import/refresh, list membership, and add/remove actions.                                 |
+| Simkl connection and sync          | Improved           | Device-flow auth, stronger credential persistence, activity-based incremental sync, refresh throttling, and safer status/removal handling.    |
+| Shared library actions             | Added and improved | Consistent add/remove and watched-state actions across Home, details, Library, Search, Discover, and Collection, with provider IDs preserved. |
+| Metadata and identity              | Improved           | TMDB language fallback, textless artwork, provider identity matching, and field-aware metadata fallback.                                      |
+| Continue Watching and Up Next      | Improved           | Better identity matching, duplicate suppression, safer progress cleanup, and refresh invalidation.                                            |
+| Tracking interface                 | Changed            | Restored fork-branded Trakt, Simkl, and MDBList cards and buttons; includes manual Simkl/MDBList sync and device-flow/code-copy behavior.     |
+| QR sign-in and account persistence | Fixed              | Local QR generation, configurable sign-in redirect, and account marker persistence so reloads keep account connections and settings.          |
+| Detail screen                      | Improved           | Fixed UTF-8 genre separators and softened the poster vignette for readability.                                                                |
+| Configuration and deployment       | Changed            | Environment-variable documentation, placeholder client IDs in `.env.example`, and a separate Docker test setup.                               |
+| Localization and layout            | Improved           | Localized tracking-card text and refinements to title presentation and layout preferences.                                                    |
 
-- **Local library:** save and remove titles locally, with the shared library
-  action system.
-- **MDBList:** connect with the PIN/OAuth flow, validate the account, import the
-  watchlist and personal lists, refresh changes made on the MDBList website,
-  add and remove movies or shows, and manage list membership.
-- **Simkl:** connect and reconnect accounts, import library statuses, cache
-  activity timestamps, check activities before downloading changes, fetch
-  incremental updates, throttle refreshes, and remove titles with a
-  confirmation when watched history or ratings are affected.
-- **Trakt:** use the shared library abstraction for watchlists and lists while
-  preserving provider-specific list management.
-- **TVDB metadata:** optionally configure a profile-scoped TVDB API key/PIN
-  for series and episode metadata. TVDB is used as a field-aware fallback
-  behind existing catalog/add-on data and TMDB; it does not replace Simkl,
-  Trakt, or Nuvio watch-progress ownership.
-
-### Consistent title actions
-
-The same title actions are available from the detail screen, Home posters,
-library posters, and the shared Search/Discover/Collection poster surfaces:
-
-- open details;
-- add a title to the active library source;
-- remove a title from the active library source;
-- manage provider lists or statuses where applicable;
-- mark a movie or series watched/unwatched.
-
-Provider IDs are carried from catalog and library cards into the mutation
-request. This is important for services such as MDBList, which cannot reliably
-change a list from only a display title or an addon-specific item ID.
-
-### Reliability and deployment improvements
-
-- Browser provider calls use same-origin proxy routes where provider CORS
-  behavior prevents direct browser requests.
-- Provider requests have explicit timeout, connection-error, request-spacing,
-  and rate-limit handling.
-- Runtime configuration keeps server-only credentials out of the browser
-  bundle.
-- Metadata resolution supports provider identity candidates, preferred
-  metadata add-ons, TMDB language fallback, textless artwork fallback, and
-  optional TVDB enrichment for missing series/episode fields.
-- Continue Watching and Up Next use stronger identity matching, duplicate
-  suppression, progress-source handling, and enrichment invalidation so
-  refreshed metadata does not create duplicate cards or stale progress.
-- Profile settings and provider credentials can be synchronized through the
-  existing profile sync services, including TVDB credentials.
-- Home and detail views include improved title localization, metadata
-  presentation, and layout preferences.
-- Docker and local development proxy configuration are included for the
-  provider integrations.
-- Regression tests cover the provider sync flows, library mutations, account
-  lifecycle, and pointer/touch/keyboard poster actions.
+The fork also includes regression tests for metadata fallback, TVDB, account
+flows, provider synchronization, library mutations, and shared title actions.
 
 See [CHANGELOG.md](CHANGELOG.md) for the chronological implementation history
 and [environment configuration](docs/environment.md) for deployment settings.
@@ -214,13 +176,13 @@ for Docker/static hosting, CORS/Range requirements, and client resource limits.
 Use the default `:stable` tag for normal self-hosting. To switch channels, edit
 all five `image:` tags in `docker-compose.yml` to the same tag before pulling.
 
-| Tag | Meaning |
-| --- | --- |
-| `stable` | Recommended. Latest official release. |
-| `nightly` | Latest development build from `web`; may be unstable. |
-| `latest` | Most recently published project build, whether development or release. |
-| `X.Y.Z` | Pinned immutable release, such as `0.1.0`. |
-| `desktop` | Temporary legacy compatibility alias. |
+| Tag       | Meaning                                                                |
+| --------- | ---------------------------------------------------------------------- |
+| `stable`  | Recommended. Latest official release.                                  |
+| `nightly` | Latest development build from `web`; may be unstable.                  |
+| `latest`  | Most recently published project build, whether development or release. |
+| `X.Y.Z`   | Pinned immutable release, such as `0.1.0`.                             |
+| `desktop` | Temporary legacy compatibility alias.                                  |
 
 Examples: use `:stable` for the recommended channel, `:nightly` for the latest
 web development build, `:latest` for the newest published build of any kind,
