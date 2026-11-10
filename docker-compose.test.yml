@@ -1,0 +1,44 @@
+# Lokale testomgeving die alles uit deze checkout bouwt (in plaats van de
+# ghcr.io-images). Eigen containernamen en poort 4174, zodat een bestaande
+# installatie op 4173 ongemoeid blijft.
+#
+#   docker compose -p nuvioweb-test -f docker-compose.yml -f docker-compose.test.yml up -d --build
+#   docker compose -p nuvioweb-test down
+services:
+  nuvioweb:
+    container_name: nuvioweb-test
+    image: nuvioweb-test:local
+    build:
+      context: .
+    ports: !override
+      - "4174:80"
+  trakt-auth-bridge:
+    container_name: nuvioweb-test-trakt-auth-bridge
+    image: nuvioweb-test-trakt-auth-bridge:local
+    build:
+      context: .
+      dockerfile: services/trakt-auth-bridge/Dockerfile
+  mdblist-bridge:
+    container_name: nuvioweb-test-mdblist-bridge
+    image: nuvioweb-test-mdblist-bridge:local
+    build:
+      context: .
+      dockerfile: services/mdblist-bridge/Dockerfile
+  debrid-api-bridge:
+    container_name: nuvioweb-test-debrid-api-bridge
+    image: nuvioweb-test-debrid-api-bridge:local
+    build:
+      context: .
+      dockerfile: services/debrid-api-bridge/Dockerfile
+  external-return-bridge:
+    container_name: nuvioweb-test-external-return-bridge
+    image: nuvioweb-test-external-return-bridge:local
+    build:
+      context: .
+      dockerfile: services/external-return-bridge/Dockerfile
+  transcode-bridge:
+    container_name: nuvioweb-test-transcode-bridge
+    image: nuvioweb-test-transcode-bridge:local
+    build:
+      context: .
+      dockerfile: services/transcode-bridge/Dockerfile
