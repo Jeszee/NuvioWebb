@@ -9735,7 +9735,7 @@ export const SettingsScreen = {
         this.stopDesktopSimklPolling();
         return;
       }
-      const result = await SimklAuthService.pollPin().catch((error) => ({
+      const result = await SimklAuthService.pollDeviceAuth().catch((error) => ({
         type: "failed",
         message: String(error?.message || error || "Unable to reach Simkl. Try again.")
       }));
@@ -9743,7 +9743,10 @@ export const SettingsScreen = {
         this.stopDesktopSimklPolling();
         this.desktopSimklStatusMessage = `Connected as ${result.username || "Simkl user"}`;
         this.desktopSimklErrorMessage = null;
-        await SimklSyncService.refresh({ force: true }).catch(() => false);
+        await SimklSyncService.refresh({ force: true }).catch((error) => {
+          this.desktopSimklErrorMessage = String(error?.message || error);
+          return false;
+        });
         await this.render();
         return;
       }
@@ -9990,7 +9993,7 @@ export const SettingsScreen = {
     this.actionMap.set("tracking:desktop:simkl:connect", async () => {
       this.desktopSimklErrorMessage = null;
       try {
-        await SimklAuthService.startPinAuth();
+        await SimklAuthService.startDeviceAuth();
         this.desktopSimklStatusMessage = "Waiting for Simkl approval...";
         this.desktopTrackingExpanded = { ...this.desktopTrackingExpanded, simkl: true };
         this.startDesktopSimklPolling();
@@ -10007,7 +10010,7 @@ export const SettingsScreen = {
     });
     this.actionMap.set("tracking:desktop:simkl:cancel", () => {
       this.stopDesktopSimklPolling();
-      SimklAuthService.cancelPinAuth();
+      SimklAuthService.cancelDeviceAuth();
       this.desktopSimklStatusMessage = null;
       this.desktopSimklErrorMessage = null;
     });

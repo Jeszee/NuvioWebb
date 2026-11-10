@@ -319,7 +319,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
     this.actionMap.set("tracking:simklConnect", async () => {
       this.simklErrorMessage = null;
       try {
-        await SimklAuthService.startPinAuth();
+        await SimklAuthService.startDeviceAuth();
         this.simklStatusMessage = t("simkl_status_enter_code", {}, "Enter the code on Simkl to finish connecting.");
         this.startSimklPolling();
       } catch (error) {
@@ -448,7 +448,8 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
         options: [
           { id: SimklAnimeIdPreference.IMDB, label: "IMDb / TMDB" },
           { id: SimklAnimeIdPreference.MAL, label: "MyAnimeList" },
-          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" }
+          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" },
+          { id: SimklAnimeIdPreference.TVDB, label: "TVDB" }
         ],
         selectedId: settings.simklAnimeIdPreference,
         returnFocusKey: "tracking:animeId",
@@ -511,7 +512,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
               ${traktConnected ? this.renderActionRow({ focusKey: "tracking:cwWindow", title: t("trakt_continue_watching_window", {}, "Continue Watching window"), subtitle: t("trakt_continue_watching_subtitle", {}, "Trakt history considered for Continue Watching"), value: settings.continueWatchingDaysCap === 0 ? t("trakt_all_history", {}, "All history") : t("trakt_days", [settings.continueWatchingDaysCap], `${settings.continueWatchingDaysCap} days`) }) : ""}
               ${traktConnected ? this.renderToggleRow({ focusKey: "tracking:comments", title: t("trakt_comments_title", {}, "Trakt comments"), subtitle: t("trakt_comments_subtitle", {}, "Show Trakt reviews on metadata pages"), checked: Boolean(settings.showMetaComments) }) : ""}
               ${traktConnected ? this.renderActionRow({ focusKey: "tracking:moreLikeThis", title: t("tracking_more_like_this_source", {}, "More Like This source"), subtitle: t("tracking_more_like_this_source_subtitle", {}, "Choose related titles from Trakt or TMDB"), value: settings.moreLikeThisSource === MoreLikeThisSourcePreference.TMDB ? "TMDB" : "Trakt" }) : ""}
-              ${simklConnected ? this.renderActionRow({ focusKey: "tracking:animeId", title: t("tracking_simkl_anime_id_title", {}, "Simkl anime ID"), subtitle: t("tracking_simkl_anime_id_subtitle", {}, "Preferred catalog identity for anime matching"), value: settings.simklAnimeIdPreference === "mal" ? "MyAnimeList" : settings.simklAnimeIdPreference === "kitsu" ? "Kitsu" : "IMDb / TMDB" }) : ""}
+              ${simklConnected ? this.renderActionRow({ focusKey: "tracking:animeId", title: t("tracking_simkl_anime_id_title", {}, "Simkl anime ID"), subtitle: t("tracking_simkl_anime_id_subtitle", {}, "Preferred catalog identity for anime matching"), value: settings.simklAnimeIdPreference === "mal" ? "MyAnimeList" : settings.simklAnimeIdPreference === "kitsu" ? "Kitsu" : settings.simklAnimeIdPreference === "tvdb" ? "TVDB" : "IMDb / TMDB" }) : ""}
             </div>
           </div>
           ${simklConnected ? `<p class="settings-trakt-meta-copy settings-tracking-attribution">${escapeHtml(t("licenses_attributions_simkl_body", {}, "Library and tracking data provided by Simkl."))}</p>` : ""}
@@ -532,7 +533,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
     if (connected) {
       return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("simkl_account_title", {}, "Simkl account"))}</h3><p class="settings-trakt-body-copy">${escapeHtml(t("simkl_connected_as", [auth.username || "Simkl user"], `Connected as ${auth.username || "Simkl user"}`))}</p>${this.renderActionRow({ focusKey: "tracking:simklSync", title: t("simkl_sync_now", {}, "Sync now"), subtitle: t("simkl_status_syncing", {}, "Check Simkl immediately for remote changes") })}${this.renderActionRow({ focusKey: "tracking:simklVisit", title: t("simkl_visit", {}, "Visit Simkl") })}${this.renderActionRow({ focusKey: "tracking:simklInfo", title: t("simkl_sync_info_action", {}, "How syncing works"), subtitle: t("simkl_sync_info_title", {}, "Automatic refresh and Continue Watching rules") })}${this.showSimklInfo ? `<div class="settings-tracking-sync-info"><p>${escapeHtml(t("simkl_sync_info_description", [15], "Nuvio checks Simkl automatically at most once every 15 minutes."))}</p><p>${escapeHtml(t("simkl_sync_info_activity", {}, "Each refresh downloads only changes."))}</p><p>${escapeHtml(t("simkl_sync_info_manual", {}, "Changes made in Nuvio are sent immediately."))}</p><p>${escapeHtml(t("simkl_sync_info_library_statuses", {}, "On Hold and Dropped shows stay hidden from Continue Watching."))}</p>${this.renderActionRow({ focusKey: "tracking:simklDocs", title: t("simkl_sync_info_docs", {}, "Read the Simkl sync guide") })}</div>` : ""}${this.renderActionRow({ focusKey: "tracking:simklDisconnect", title: t("simkl_disconnect", {}, "Disconnect Simkl"), subtitle: t("simkl_disconnect_subtitle", {}, "Remove this profile's Simkl connection") })}${this.simklStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.simklStatusMessage)}</p>` : ""}${this.simklErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.simklErrorMessage)}</p>` : ""}</div>`;
     }
-    return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("simkl_connect", {}, "Connect Simkl"))}</h3>${waiting ? `<p class="settings-trakt-body-copy">${escapeHtml(t("simkl_awaiting_instruction", {}, "Open the Simkl verification page and enter this code."))}</p><strong>${escapeHtml(auth.verificationUrl || "https://simkl.com/pin")}</strong><div class="settings-trakt-code">${escapeHtml(auth.userCode || "-")}</div><p class="settings-trakt-meta-copy">${escapeHtml(t("simkl_code_expires", [formatCountdown(Number(auth.expiresAt) - Date.now())], `Code expires in ${formatCountdown(Number(auth.expiresAt) - Date.now())}`))}</p>` : `<p class="settings-trakt-body-copy">${escapeHtml(t("simkl_description", {}, "A manual PIN will be shown here. Enter it on Simkl from a phone or computer."))}</p>${this.renderActionRow({ focusKey: "tracking:simklConnect", title: t("simkl_connect", {}, "Connect Simkl"), subtitle: SimklAuthService.hasRequiredCredentials() ? t("simkl_status_enter_code", {}, "Generate manual PIN") : t("simkl_missing_credentials", {}, "Missing SIMKL_CLIENT_ID") })}`}${this.simklStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.simklStatusMessage)}</p>` : ""}${this.simklErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.simklErrorMessage)}</p>` : ""}</div>`;
+    return `<div class="settings-trakt-card settings-tracking-account-card"><h3 class="settings-trakt-card-title">${escapeHtml(t("simkl_connect", {}, "Connect Simkl"))}</h3>${waiting ? `<p class="settings-trakt-body-copy">${escapeHtml(t("simkl_awaiting_instruction", {}, "Open the Simkl verification page and enter this code."))}</p><strong>${escapeHtml(auth.verificationUrl || "https://simkl.com/activate")}</strong><div class="settings-trakt-code">${escapeHtml(auth.userCode || "-")}</div><p class="settings-trakt-meta-copy">${escapeHtml(t("simkl_code_expires", [formatCountdown(Number(auth.expiresAt) - Date.now())], `Code expires in ${formatCountdown(Number(auth.expiresAt) - Date.now())}`))}</p>` : `<p class="settings-trakt-body-copy">${escapeHtml(t("simkl_description", {}, "A manual PIN will be shown here. Enter it on Simkl from a phone or computer."))}</p>${this.renderActionRow({ focusKey: "tracking:simklConnect", title: t("simkl_connect", {}, "Connect Simkl"), subtitle: SimklAuthService.hasRequiredCredentials() ? t("simkl_status_enter_code", {}, "Generate manual PIN") : t("simkl_missing_credentials", {}, "Missing SIMKL_CLIENT_ID") })}`}${this.simklStatusMessage ? `<p class="settings-trakt-message">${escapeHtml(this.simklStatusMessage)}</p>` : ""}${this.simklErrorMessage ? `<p class="settings-trakt-error">${escapeHtml(this.simklErrorMessage)}</p>` : ""}</div>`;
   },
 
   renderTrackingMdbListAccount(auth, connected, waiting) {
@@ -617,7 +618,7 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
         this.simklPollTimer = null;
         return;
       }
-      const result = await SimklAuthService.pollPin().catch((error) => ({
+      const result = await SimklAuthService.pollDeviceAuth().catch((error) => ({
         type: "failed",
         message: String(
           error?.message ||
@@ -632,7 +633,10 @@ export const TraktScreen = Object.assign(Object.create(SettingsScreen), {
           [result.username || "Simkl"],
           `Connected as ${result.username || "Simkl"}`
         );
-        await SimklSyncService.refresh({ force: true }).catch(() => false);
+        await SimklSyncService.refresh({ force: true }).catch((error) => {
+          this.simklErrorMessage = String(error?.message || error);
+          return false;
+        });
         await this.render();
         return;
       }
