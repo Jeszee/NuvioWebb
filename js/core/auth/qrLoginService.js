@@ -493,7 +493,15 @@ export const QrLoginService = {
       SessionStore.accessToken = tokens.accessToken;
       SessionStore.refreshToken = tokens.refreshToken;
       SessionStore.isAnonymousSession = false;
-      AuthManager.setState(AuthState.AUTHENTICATED);
+      // Without this the account-owner marker is never written, so the next
+      // page load treats the session as a new owner and wipes all local
+      // account data, including tracker connections.
+      try {
+        await AuthManager.establishAuthenticatedSession();
+      } catch (error) {
+        console.warn("QR sign-in: owner check failed, continuing without marker", error);
+        AuthManager.setState(AuthState.AUTHENTICATED);
+      }
       return result;
     } catch (error) {
       lastError = String(error?.message || "QR exchange failed");
