@@ -233,7 +233,7 @@ function t(key, params = {}, fallback = key) {
 
 // Returns the first value that is a non-negative integer (number or numeric
 // string); null when none is. Whitespace-only strings, non-integers and
-// non-numeric types count as missing â€” `Number("  ")` is 0 and would otherwise
+// non-numeric types count as missing — `Number("  ")` is 0 and would otherwise
 // turn an empty field into a fake specials season. An explicit 0 is reported
 // as 0 (not folded into a falsy default the way `Number(value || 0)` did) so
 // resolveSeasonEpisode() can keep a declared specials season out of its
@@ -913,7 +913,7 @@ function formatMdbListRating(provider, rating) {
 function normalizeGenreList(meta = {}) {
   const raw = Array.isArray(meta?.genres)
     ? meta.genres
-    : String(meta?.genres || meta?.genre || "").split(/[â€¢,|/]/);
+    : String(meta?.genres || meta?.genre || "").split(/[•,|/]/);
   return raw.map((genre) => String(genre || "").trim()).filter(Boolean);
 }
 
@@ -1077,7 +1077,7 @@ function getAddonBadgeLabel(name = "") {
     return "A";
   }
   if (/torrentio|torbox|torrent/i.test(cleaned)) {
-    return "Âµ";
+    return "µ";
   }
   return (
     cleaned
@@ -3354,7 +3354,7 @@ export const MetaDetailsScreen = {
         this.meta?.landscapePoster ||
         this.meta?.poster ||
         "",
-      label: t("detail_finding_stream", {}, "Finding a streamâ€¦")
+      label: t("detail_finding_stream", {}, "Finding a stream…")
     });
     if (this.renderedRouteHandoffMarkup !== markup) {
       this.container.innerHTML = markup;
@@ -4778,7 +4778,7 @@ export const MetaDetailsScreen = {
 
   renderHeroMetaRows(meta) {
     const hasExternalRatings = hasMdbListRatings(meta?.mdbListRatings);
-    const genresText = normalizeGenreList(meta).join(" â€¢ ");
+    const genresText = normalizeGenreList(meta).join(" • ");
     const yearText = formatMovieReleaseDate(meta);
     const imdbValue = resolveImdbRating(meta);
     const imdbText =
@@ -5394,7 +5394,7 @@ export const MetaDetailsScreen = {
       : `<div class="series-insight-empty">${escapeHtml(t("detail.noEpisodeRatings", {}, "No episode ratings in this season."))}</div>`;
     return `
       <div class="series-rating-seasons" data-scroll-key="rating-seasons">${seasonButtons}</div>
-      <div class="series-rating-summary">${escapeHtml(t("detail.seasonSummary", { season: this.selectedRatingSeason, count: ratings.length }, "Season {{season}} â€¢ {{count}} episodes"))}</div>
+      <div class="series-rating-summary">${escapeHtml(t("detail.seasonSummary", { season: this.selectedRatingSeason, count: ratings.length }, "Season {{season}} • {{count}} episodes"))}</div>
       <div class="series-episode-ratings-grid" data-scroll-key="rating-chips:${this.selectedRatingSeason}">${chips}</div>
     `;
   },
@@ -5701,7 +5701,7 @@ export const MetaDetailsScreen = {
       ...(includeFilename && filename ? [filename] : [])
     ]
       .filter(Boolean)
-      .join(" Â· ");
+      .join(" · ");
   },
 
   async resolveSeasonEpisodeStreams(episode = {}) {
@@ -5762,8 +5762,8 @@ export const MetaDetailsScreen = {
     const downloaded = Number(flow?.downloadedEpisodes || 0);
     const remaining = Number(flow?.candidates?.length || 0);
     content.innerHTML = `
-      <p class="season-download-summary">${escapeHtml(`${total} episodes Â· ${downloaded} already downloaded Â· ${remaining} to process`)}</p>
-      ${flow?.preparing ? `<p class="season-download-progress" aria-live="polite">Finding sourcesâ€¦ ${Number(flow.preparedCount || 0)} / ${remaining}</p>` : ""}
+      <p class="season-download-summary">${escapeHtml(`${total} episodes · ${downloaded} already downloaded · ${remaining} to process`)}</p>
+      ${flow?.preparing ? `<p class="season-download-progress" aria-live="polite">Finding sources… ${Number(flow.preparedCount || 0)} / ${remaining}</p>` : ""}
     `;
     if (!manual) return content;
     const list = document.createElement("div");
@@ -5786,10 +5786,10 @@ export const MetaDetailsScreen = {
               ? "Preferred"
               : selected?.subtitle?.lang || "None";
       const sourceLabel = selected
-        ? `${this.getSeasonDownloadSourceLabel(selected.stream)} Â· Subtitle: ${subtitleLabel}`
+        ? `${this.getSeasonDownloadSourceLabel(selected.stream)} · Subtitle: ${subtitleLabel}`
         : "Select Source";
       const fullSourceLabel = selected
-        ? `${this.getSeasonDownloadSourceLabel(selected.stream, { includeFilename: true })} Â· Subtitle: ${subtitleLabel}`
+        ? `${this.getSeasonDownloadSourceLabel(selected.stream, { includeFilename: true })} · Subtitle: ${subtitleLabel}`
         : "";
       button.textContent = sourceLabel;
       if (fullSourceLabel) button.title = fullSourceLabel;
@@ -5992,7 +5992,7 @@ export const MetaDetailsScreen = {
     if (!flow || flow.cancelled) return;
     this.showSeasonDownloadDialog({
       title: `S${Number(episode.season)}E${Number(episode.episode)}`,
-      subtitle: "Finding sourcesâ€¦",
+      subtitle: "Finding sources…",
       buttons: [
         {
           label: t("common.cancel", {}, "Cancel"),
@@ -6070,7 +6070,7 @@ export const MetaDetailsScreen = {
     if (!flow || !selected) return;
     this.showSeasonDownloadDialog({
       title: `S${Number(episode.season)}E${Number(episode.episode)}`,
-      subtitle: "Finding subtitlesâ€¦",
+      subtitle: "Finding subtitles…",
       buttons: [
         {
           label: t("common.back", {}, "Back"),
@@ -6100,7 +6100,7 @@ export const MetaDetailsScreen = {
       content.className = "stream-download-options";
       const header = document.createElement("div");
       header.className = "download-options-header";
-      header.innerHTML = `<div class="stream-download-options-source">${escapeHtml([`S${Number(episode.season)}E${Number(episode.episode)}`, episode.title || "", sourceDisplay.quality || ""].filter(Boolean).join(" Â· "))}<span>${escapeHtml(sourceDisplay.addonName || selected.stream?.addonName || "")}</span></div><div class="stream-download-options-label">Subtitles</div>`;
+      header.innerHTML = `<div class="stream-download-options-source">${escapeHtml([`S${Number(episode.season)}E${Number(episode.episode)}`, episode.title || "", sourceDisplay.quality || ""].filter(Boolean).join(" · "))}<span>${escapeHtml(sourceDisplay.addonName || selected.stream?.addonName || "")}</span></div><div class="stream-download-options-label">Subtitles</div>`;
       content.appendChild(header);
       content.appendChild(
         createBrowserOfflineSubtitlePicker({
@@ -6167,7 +6167,7 @@ export const MetaDetailsScreen = {
   showSeasonDownloadResult(added = 0, skipped = 0) {
     this.showSeasonDownloadDialog({
       title: t("offline.downloadSeason", {}, "Download Season"),
-      subtitle: `${added} episode${added === 1 ? "" : "s"} added to download queue${skipped ? ` Â· ${skipped} skipped` : ""}`,
+      subtitle: `${added} episode${added === 1 ? "" : "s"} added to download queue${skipped ? ` · ${skipped} skipped` : ""}`,
       buttons: [
         { label: t("common.close", {}, "Close"), onAction: () => this.closeSeasonDownloadDialog() }
       ]
@@ -7228,7 +7228,7 @@ export const MetaDetailsScreen = {
           button.appendChild(badge);
           button.setAttribute(
             "aria-label",
-            `${String(button.querySelector(".nuvio-dialog-button-label")?.textContent || "")} â€” Default library destination`
+            `${String(button.querySelector(".nuvio-dialog-button-label")?.textContent || "")} — Default library destination`
           );
         }
       }
@@ -8781,7 +8781,7 @@ export const MetaDetailsScreen = {
         const title = trailer.name || trailer.type || t("detail_tab_trailer", {}, "Trailer");
         const subtitle = [trailer.type, trailer.lang ? String(trailer.lang).toUpperCase() : ""]
           .filter(Boolean)
-          .join(" â€¢ ");
+          .join(" • ");
         return `
         <article class="detail-morelike-card detail-trailer-card focusable"${Platform.isBrowser() ? ' role="button"' : ""}
                  data-action="openSharedTrailer"
@@ -11147,7 +11147,7 @@ export const MetaDetailsScreen = {
           <div class="series-stream-left">
             ${this.meta?.logo ? `<img src="${capTmdbImageSize(this.meta.logo, "logo")}" class="series-stream-logo" alt="logo" />` : `<div class="series-stream-heading">${this.meta?.name || "Movie"}</div>`}
             <div class="series-stream-episode">${this.meta?.name || ""}</div>
-            <div class="series-stream-episode-title">${Array.isArray(this.meta?.genres) ? this.meta.genres.slice(0, 3).join(" â€¢ ") : ""}</div>
+            <div class="series-stream-episode-title">${Array.isArray(this.meta?.genres) ? this.meta.genres.slice(0, 3).join(" • ") : ""}</div>
           </div>
           <div class="series-stream-right">
             <div class="series-stream-filters">${filterTabs}</div>
@@ -11385,7 +11385,7 @@ export const MetaDetailsScreen = {
         itemTitle:
           this.meta?.name || this.params?.fallbackTitle || this.params?.itemId || "Untitled",
         itemSubtitle: "",
-        genres: Array.isArray(this.meta?.genres) ? this.meta.genres.slice(0, 3).join(" â€¢ ") : "",
+        genres: Array.isArray(this.meta?.genres) ? this.meta.genres.slice(0, 3).join(" • ") : "",
         year: releaseYear,
         backdrop: streamBackdrop,
         poster: this.meta?.poster || null,
