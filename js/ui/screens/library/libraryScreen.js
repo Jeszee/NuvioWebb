@@ -860,6 +860,22 @@ export const LibraryScreen = {
         </section>
       `;
     }
+    if (state.sourceMode === "simkl") {
+      return `
+        <section class="library-picker-groups library-saved-picker-groups" id="libraryPickerGroupsMount">
+          <div class="library-picker-row library-saved-picker-row library-primary-filter-row">
+            ${this.renderPicker(
+              "list",
+              "Status",
+              this.controller.getSelectedListLabel(),
+              this.controller.getPickerOptions("list"),
+              "library-picker-flex"
+            )}
+            ${this.renderLibrarySearchButton()}
+          </div>
+        </section>
+      `;
+    }
     const listPickerMarkup =
       state.sourceMode === "trakt" ||
       state.sourceMode === "mdblist" ||
@@ -1488,6 +1504,9 @@ export const LibraryScreen = {
                        data-item-id="${escapeHtml(item.id)}"
                        data-item-type="${escapeHtml(item.type || "movie")}"
                        data-item-title="${escapeHtml(item.name || item.id || "Untitled")}"
+                       data-imdb-id="${escapeHtml(item.ids?.imdb || item.imdbId || item.imdb_id || "")}"
+                       data-tmdb-id="${escapeHtml(item.ids?.tmdb || item.tmdbId || item.tmdb_id || "")}"
+                       data-trakt-id="${escapeHtml(item.ids?.trakt || item.traktId || item.trakt_id || "")}"
                        data-poster-src="${escapeHtml(item.poster || "")}"
                        data-backdrop-src="${escapeHtml(item.background || "")}"
                        data-addon-base-url="${escapeHtml(item.addonBaseUrl || "")}"

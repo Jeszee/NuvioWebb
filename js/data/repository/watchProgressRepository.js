@@ -18,6 +18,7 @@ import { SimklSyncService } from "./simklSyncService.js";
 import { MdbListAuthStore } from "../local/mdbListAuthStore.js";
 import { MdbListSyncService } from "./mdbListSyncService.js";
 import { metaRepository } from "./metaRepository.js";
+import { metadataIdentityCandidatesForItem } from "./metadataIdentityCandidates.js";
 import {
   deduplicateContinueWatchingItems,
   isSeriesType,
@@ -571,8 +572,8 @@ async function batchEnrichProgressItems(items) {
   if (!items.length) return [];
   const now = Date.now();
   return mapWithConcurrency(items, PROGRESS_META_CONCURRENCY, async (item) => {
-    const lookupId = item.imdbId || item.contentId;
-    const cacheKey = `${item.contentType}:${lookupId}`;
+    const lookupIds = metadataIdentityCandidatesForItem(item);
+    const cacheKey = `${item.contentType}:${lookupIds.join("|")}`;
     const cached = enrichedMetaCache.get(cacheKey);
     let meta = null;
     if (cached && now - cached.timestamp < ENRICHED_META_CACHE_TTL_MS) {
@@ -580,11 +581,11 @@ async function batchEnrichProgressItems(items) {
     } else {
       const canonicalType = item.contentType === "series" ? "series" : "movie";
       const result = await withTimeout(
-        metaRepository.getMetaFromAllAddons(canonicalType, lookupId),
+        metaRepository.getMetaFromAllAddonsForIds(canonicalType, lookupIds),
         PROGRESS_META_TIMEOUT_MS,
         null
       ).catch(() => null);
-      meta = result?.status === "success" && result?.data ? result.data : null;
+      meta = result?.data || null;
       // Only cache real metadata. Caching a null (timeout/miss) would leave the
       // item unenriched for the full TTL after a single slow response.
       if (meta) {

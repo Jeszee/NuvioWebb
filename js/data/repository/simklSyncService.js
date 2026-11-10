@@ -2,18 +2,21 @@ import { LocalStore } from "../../core/storage/localStore.js";
 import { ProfileManager } from "../../core/profile/profileManager.js";
 import { SimklAnimeIdPreference, TraktSettingsStore } from "../local/traktSettingsStore.js";
 import { SimklAuthService } from "./simklAuthService.js";
-import { simklRequest } from "./simklAuthService.js";
+import { simklRequest, withBrowserLock } from "./simklAuthService.js";
 
 const STORE_KEY = "simklSyncState";
+const SNAPSHOT_SCHEMA_VERSION = 3;
 const AUTOMATIC_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const FORCED_REFRESH_INTERVAL_MS = 15 * 1000;
 // Continue Watching is user-facing: opening Home or returning to it should be
 // able to pick up progress recorded on another device. Fifteen minutes is fine
 // for background upkeep but made NuvioWeb look like it had stopped syncing, so
 // a CW resolve is allowed to re-check far sooner while still being debounced
 // enough that ordinary navigation cannot hammer the API.
 const CONTINUE_WATCHING_REFRESH_INTERVAL_MS = 60 * 1000;
-const EXTENDED_QUERY =
-  "extended=full_anime_seasons&episode_watched_at=yes&episode_tvdb_id=yes&include_all_episodes=yes&language=en";
+const EPISODE_QUERY =
+  "extended=full&episode_watched_at=yes&include_all_episodes=original&language=en";
+const ITEM_QUERY = "language=en";
 const STATUS_DEFINITIONS = [
   { status: "watching", key: "simkl:status:watching", title: "Watching", types: ["series"] },
   {
@@ -46,7 +49,7 @@ function activeProfileId() {
 
 function emptySnapshot() {
   return {
-    schemaVersion: 1,
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     initialized: false,
     watermark: null,
     activities: null,
@@ -66,7 +69,7 @@ function readEnvelope() {
 
 function getSnapshot(profileId = activeProfileId()) {
   const stored = readEnvelope().profiles[String(profileId)];
-  return stored && typeof stored === "object"
+  return stored && typeof stored === "object" && stored.schemaVersion === SNAPSHOT_SCHEMA_VERSION
     ? {
         ...emptySnapshot(),
         ...stored,
@@ -90,7 +93,7 @@ function clearSnapshot(profileId = activeProfileId()) {
 }
 
 function mediaForEntry(entry = {}) {
-  return entry.movie || entry.show || null;
+  return entry.movie || entry.show || entry.anime || null;
 }
 
 function idValue(ids = {}, key) {
@@ -137,6 +140,9 @@ function canonicalContentId(media = {}, mediaType = "shows") {
       if (idValue(ids, "mal")) return `mal:${idValue(ids, "mal")}`;
       if (idValue(ids, "anidb")) return `anidb:${idValue(ids, "anidb")}`;
     }
+    if (preference === SimklAnimeIdPreference.TVDB && idValue(ids, "tvdb")) {
+      return `tvdb:${idValue(ids, "tvdb")}`;
+    }
   }
   if (idValue(ids, "imdb")) return idValue(ids, "imdb");
   for (const key of ["tmdb", "tvdb", "mal", "anidb", "anilist", "kitsu", "simkl"]) {
@@ -173,24 +179,6 @@ function flattenAllItems(payload = {}) {
   return entries;
 }
 
-function mergeDelta(current = [], payload = {}) {
-  const byKey = new Map();
-  current.forEach((entry) => {
-    const key = entryStableKey(entry);
-    if (key) byKey.set(key, entry);
-  });
-  flattenAllItems(payload).forEach((entry) => {
-    const key = entryStableKey(entry);
-    if (key) byKey.set(key, entry);
-  });
-  return Array.from(byKey.values());
-}
-
-function reconcileCurrentIds(current = [], payload = {}) {
-  const allowed = new Set(flattenAllItems(payload).map(entryStableKey).filter(Boolean));
-  return current.filter((entry) => allowed.has(entryStableKey(entry)));
-}
-
 function domain(activities = {}, type) {
   return type === "shows" ? activities?.tv_shows || {} : activities?.[type] || {};
 }
@@ -206,17 +194,35 @@ async function fetchAllItems(path, profileId) {
   return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
 }
 
-async function initialSync(profileId) {
+async function fetchAllTypeEntries(type, profileId) {
+  const query = type === "movies" ? ITEM_QUERY : EPISODE_QUERY;
+  let payload;
+  try {
+    payload = await fetchAllItems(`/sync/all-items/${type}?${query}`, profileId);
+  } catch (error) {
+    if (error?.status !== 400 || String(error?.payload?.error || "") !== "max_items") {
+      throw error;
+    }
+    payload = await fetchAllItems(`/sync/all-items/${type}?${ITEM_QUERY}`, profileId);
+  }
+  return flattenAllItems({ [type]: payload[type] });
+}
+
+async function fetchInitialEntries(profileId) {
   const entries = [];
   for (const type of ["shows", "movies", "anime"]) {
-    const payload = await fetchAllItems(`/sync/all-items/${type}?${EXTENDED_QUERY}`, profileId);
-    entries.push(...flattenAllItems(payload).filter((entry) => entry.mediaType === type));
+    entries.push(...(await fetchAllTypeEntries(type, profileId)));
   }
-  const { payload: playback } = await simklRequest("/sync/playback", { profileId });
+  return entries;
+}
+
+async function initialSync(profileId) {
   const { payload: activities } = await simklRequest("/sync/activities", { profileId });
+  const entries = await fetchInitialEntries(profileId);
+  const { payload: playback } = await simklRequest("/sync/playback", { profileId });
   const now = Date.now();
   return {
-    schemaVersion: 1,
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     initialized: true,
     watermark: activities?.all || null,
     activities: activities || null,
@@ -229,6 +235,25 @@ async function initialSync(profileId) {
     lastSyncedAt: now,
     lastCheckedAt: now
   };
+}
+
+function mergeEntries(currentEntries = [], changedEntries = []) {
+  const entriesByKey = new Map(
+    currentEntries.map((entry) => [entryStableKey(entry), entry]).filter(([key]) => Boolean(key))
+  );
+  changedEntries.forEach((entry) => {
+    const key = entryStableKey(entry);
+    if (key && statusDefinitionForEntry(entry)) entriesByKey.set(key, entry);
+  });
+  return Array.from(entriesByKey.values());
+}
+
+function activeEntryKeys(payload) {
+  return new Set(
+    flattenAllItems(payload)
+      .map((entry) => entryStableKey(entry))
+      .filter(Boolean)
+  );
 }
 
 async function incrementalSync(current, profileId, { rereadPlayback = false } = {}) {
@@ -244,28 +269,32 @@ async function incrementalSync(current, profileId, { rereadPlayback = false } = 
     return { ...current, activities, lastCheckedAt: Date.now() };
   }
   if (!current.watermark) return initialSync(profileId);
+  const statusChanged = anyDomainChanged(current.activities, activities, [
+    "rated_at",
+    "plantowatch",
+    "watching",
+    "completed",
+    "hold",
+    "dropped"
+  ]);
+  const removalsChanged = anyDomainChanged(current.activities, activities, ["removed_from_list"]);
   let entries = current.entries || [];
-  if (
-    anyDomainChanged(current.activities, activities, [
-      "rated_at",
-      "plantowatch",
-      "watching",
-      "completed",
-      "hold",
-      "dropped"
-    ])
-  ) {
-    const payload = await fetchAllItems(
-      `/sync/all-items?date_from=${encodeURIComponent(current.watermark)}&${EXTENDED_QUERY}`,
-      profileId
-    );
-    entries = mergeDelta(entries, payload);
+  if (statusChanged) {
+    const dateFrom = current.activities?.all || current.watermark;
+    if (dateFrom) {
+      const payload = await fetchAllItems(
+        `/sync/all-items?date_from=${encodeURIComponent(dateFrom)}&${EPISODE_QUERY}`,
+        profileId
+      );
+      entries = mergeEntries(entries, flattenAllItems(payload));
+    } else {
+      entries = await fetchInitialEntries(profileId);
+    }
   }
-  if (anyDomainChanged(current.activities, activities, ["removed_from_list"])) {
-    entries = reconcileCurrentIds(
-      entries,
-      await fetchAllItems("/sync/all-items?extended=simkl_ids_only", profileId)
-    );
+  if (removalsChanged) {
+    const payload = await fetchAllItems("/sync/all-items?extended=simkl_ids_only", profileId);
+    const activeKeys = activeEntryKeys(payload);
+    entries = entries.filter((entry) => activeKeys.has(entryStableKey(entry)));
   }
   let playback = current.playback || [];
   // Playback positions are what Continue Watching is built from, so a refresh
@@ -605,24 +634,27 @@ export const SimklSyncService = {
   } = {}) {
     if (!SimklAuthService.isAuthenticated()) return false;
     const profileId = activeProfileId();
-    const current = getSnapshot(profileId);
-    if (!force && current.lastCheckedAt && Date.now() - current.lastCheckedAt < maxAgeMs) {
-      return false;
-    }
     if (refreshInFlight?.profileId === profileId) return refreshInFlight.promise;
-    const promise = (
-      current.initialized
-        ? incrementalSync(current, profileId, { rereadPlayback })
-        : initialSync(profileId)
-    )
-      .then((snapshot) => {
-        if (activeProfileId() !== profileId) return false;
-        saveSnapshot(snapshot, profileId);
-        return true;
-      })
-      .finally(() => {
-        if (refreshInFlight?.promise === promise) refreshInFlight = null;
-      });
+    const promise = withBrowserLock(`nuvio-simkl-sync:${profileId}`, async () => {
+      if (!SimklAuthService.isAuthenticated()) return false;
+      const current = getSnapshot(profileId);
+      if (
+        (!force && current.lastCheckedAt && Date.now() - current.lastCheckedAt < maxAgeMs) ||
+        (force &&
+          current.lastCheckedAt &&
+          Date.now() - current.lastCheckedAt < FORCED_REFRESH_INTERVAL_MS)
+      ) {
+        return false;
+      }
+      const snapshot = current.initialized
+        ? await incrementalSync(current, profileId, { rereadPlayback })
+        : await initialSync(profileId);
+      if (activeProfileId() !== profileId) return false;
+      saveSnapshot(snapshot, profileId);
+      return true;
+    }).finally(() => {
+      if (refreshInFlight?.promise === promise) refreshInFlight = null;
+    });
     refreshInFlight = { profileId, promise };
     return promise;
   },

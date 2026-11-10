@@ -12,6 +12,7 @@ import { openTouchActionSheet } from "./touchActionSheet.js";
 const POSTER_ACTION_ICONS = {
   details: "info",
   toggleLibrary: "bookmark_border",
+  removeFromLibrary: "bookmark_remove",
   manageLists: "playlist_add",
   toggleWatched: "check_circle_outline"
 };
@@ -29,6 +30,11 @@ function isMovieType(type) {
   return String(type || "").toLowerCase() === "movie";
 }
 
+function positiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function posterItemFromNode(node, fallbackType = "movie") {
   if (!node?.dataset?.itemId) {
     return null;
@@ -38,9 +44,31 @@ export function posterItemFromNode(node, fallbackType = "movie") {
   ).toLowerCase();
   const isLandscape =
     cardShape === "landscape" || Boolean(node.classList?.contains("is-landscape"));
+  const ids = {
+    ...(node.dataset.imdbId ? { imdb: node.dataset.imdbId } : {}),
+    ...(positiveInteger(node.dataset.tmdbId) ? { tmdb: positiveInteger(node.dataset.tmdbId) } : {}),
+    ...(positiveInteger(node.dataset.traktId)
+      ? { trakt: positiveInteger(node.dataset.traktId) }
+      : {})
+  };
+  const prefixedId = String(node.dataset.itemId).match(/^(imdb|tmdb|trakt):(.+)$/i);
+  if (prefixedId && !ids[prefixedId[1].toLowerCase()]) {
+    const key = prefixedId[1].toLowerCase();
+    const value = key === "imdb" ? prefixedId[2] : positiveInteger(prefixedId[2]);
+    if (value) {
+      ids[key] = value;
+    }
+  }
+  if (!ids.imdb && /^tt\d+$/i.test(node.dataset.itemId)) {
+    ids.imdb = node.dataset.itemId;
+  }
   return {
     id: String(node.dataset.itemId || "").trim(),
     type: String(node.dataset.itemType || fallbackType || "movie").trim() || "movie",
+    ids,
+    imdbId: ids.imdb || null,
+    tmdbId: ids.tmdb || null,
+    traktId: ids.trakt || null,
     title:
       String(
         node.dataset.itemTitle || node.dataset.title || node.dataset.itemId || "Untitled"
@@ -58,9 +86,22 @@ export function posterItemFromNode(node, fallbackType = "movie") {
 }
 
 function toLibraryItem(item = {}) {
+  const ids = { ...(item.ids && typeof item.ids === "object" ? item.ids : {}) };
+  const imdbId = item.imdbId || ids.imdb;
+  const tmdbId = positiveInteger(item.tmdbId || ids.tmdb);
+  const traktId = positiveInteger(item.traktId || ids.trakt);
+  if (imdbId) ids.imdb = imdbId;
+  if (tmdbId) ids.tmdb = tmdbId;
+  else delete ids.tmdb;
+  if (traktId) ids.trakt = traktId;
+  else delete ids.trakt;
   return {
     itemId: item.id,
     itemType: item.type || "movie",
+    ids,
+    imdbId: imdbId || null,
+    tmdbId,
+    traktId,
     title: item.title || item.name || item.id || "Untitled",
     poster: item.poster || null,
     background: item.background || item.backdrop || null,
@@ -122,14 +163,20 @@ export function getPosterOptions(state, options = {}) {
     actions.push({
       action: "toggleLibrary",
       label:
-        state.sourceMode === LibrarySourceMode.TRAKT
-          ? t("library_manage_lists", {}, "Manage Lists")
+        state.sourceMode === LibrarySourceMode.LOCAL
+          ? state.isSaved
+            ? t("detail.removeFromLibrary", {}, "Remove from Library")
+            : t("detail.addToLibrary", {}, "Add to Library")
           : state.sourceMode === LibrarySourceMode.SIMKL
             ? "Manage Simkl Status"
-            : state.isSaved
-              ? t("detail.removeFromLibrary", {}, "Remove from Library")
-              : t("detail.addToLibrary", {}, "Add to Library")
+            : t("library_manage_lists", {}, "Manage Lists")
     });
+    if (state.isSaved && state.sourceMode !== LibrarySourceMode.LOCAL) {
+      actions.push({
+        action: "removeFromLibrary",
+        label: t("detail.removeFromLibrary", {}, "Remove from Library")
+      });
+    }
   }
   if (includeWatched) {
     actions.push({
@@ -162,6 +209,29 @@ export async function activatePosterOption(state, action, _options = {}) {
       background: item.background || null
     });
     return { type: "updated", state: { ...state, isSaved: Boolean(isSaved) } };
+  }
+  if (action === "removeFromLibrary") {
+    const picker = await createPosterListPickerState(state);
+    if (!picker) {
+      return { type: "noop" };
+    }
+    picker.membership = Object.fromEntries(picker.tabs.map((tab) => [tab.key, false]));
+    try {
+      await libraryRepository.applyMembershipChanges(
+        picker.item,
+        { desiredMembership: picker.membership },
+        { sourceMode: state.sourceMode }
+      );
+      return { type: "updated", state: { ...state, isSaved: false } };
+    } catch (error) {
+      if (error?.code === "SIMKL_DESTRUCTIVE_REMOVAL_REQUIRED") {
+        picker.destructiveRemovalRequired = true;
+      } else {
+        console.warn("Failed to remove title from library", error);
+        picker.error = t("detail_lists_save_failed", {}, "Could not save list changes.");
+      }
+      return { type: "listPicker", state: picker };
+    }
   }
   if (action === "toggleWatched") {
     if (isSeriesType(item.type)) {
@@ -298,7 +368,7 @@ export class PosterOptionsDialogController {
       key: option.action,
       label: option.label,
       icon: POSTER_ACTION_ICONS[option.action] || "",
-      danger: option.action === "remove"
+      danger: option.action === "remove" || option.action === "removeFromLibrary"
     }));
     const adopt = (handle) => {
       if (!handle) return false;

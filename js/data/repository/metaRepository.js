@@ -1,4 +1,5 @@
 import { safeApiCall } from "../../core/network/safeApiCall.js";
+import { LayoutPreferences } from "../local/layoutPreferences.js";
 import { addonRepository } from "./addonRepository.js";
 import { MetaApi } from "../remote/api/metaApi.js";
 
@@ -6,6 +7,32 @@ function normalizeDisplayText(value) {
   return String(value ?? "")
     .replace(/\\'/g, "'")
     .replace(/\\"/g, '"');
+}
+
+function preferredMetaRequestType(addon, requestedType, inferredType, id) {
+  const typeCandidates = Array.from(
+    new Set(
+      [
+        requestedType,
+        inferredType,
+        ...(["series", "tv", "anime"].includes(String(requestedType).toLowerCase())
+          ? ["series", "tv", "anime"]
+          : ["movie"])
+      ]
+        .map((type) => String(type || "").trim())
+        .filter(Boolean)
+    )
+  );
+  for (const type of typeCandidates) {
+    const resolved = addonRepository.resolveResourceRequestType(addon, "meta", type, id, {
+      allowIdTypeFallback: true,
+      caseInsensitive: true
+    });
+    if (resolved) {
+      return resolved;
+    }
+  }
+  return "";
 }
 
 class MetaRepository {
@@ -51,10 +78,19 @@ class MetaRepository {
     }
   }
 
-  async getMetaFromAllAddons(type, id) {
+  async getMetaFromAllAddons(type, id, options = {}) {
     const requestedType = String(type || "").trim();
     const inferredType = this.inferCanonicalType(requestedType, id);
-    const cacheKey = `all:${requestedType}:${inferredType}:${String(id || "").trim()}`;
+    const configuredPreferredAddon = String(
+      LayoutPreferences.get().preferredMetadataAddonBaseUrl || ""
+    ).trim();
+    const preferredAddonBaseUrl = options?.skipPreferredAddon ? "" : configuredPreferredAddon;
+    const skippedPreferredAddonBaseUrl = options?.skipPreferredAddon
+      ? configuredPreferredAddon
+      : "";
+    const cacheKey = `all:${preferredAddonBaseUrl}:skip:${skippedPreferredAddonBaseUrl}:${requestedType}:${inferredType}:${String(
+      id || ""
+    ).trim()}`;
     if (this.metaCache.has(cacheKey)) {
       return { status: "success", data: this.metaCache.get(cacheKey) };
     }
@@ -72,6 +108,13 @@ class MetaRepository {
         if (!addon || !cleanType) {
           return;
         }
+        if (
+          skippedPreferredAddonBaseUrl &&
+          addonRepository.canonicalizeUrl(addon.baseUrl) ===
+            addonRepository.canonicalizeUrl(skippedPreferredAddonBaseUrl)
+        ) {
+          return;
+        }
         const key = `${addon.baseUrl}::${cleanType}`;
         if (seenCandidates.has(key)) {
           return;
@@ -79,6 +122,24 @@ class MetaRepository {
         seenCandidates.add(key);
         candidates.push({ addon, type: cleanType });
       };
+
+      const preferredAddonUrl = addonRepository.canonicalizeUrl(preferredAddonBaseUrl);
+      const preferredAddon = preferredAddonUrl
+        ? addons.find(
+            (addon) => addonRepository.canonicalizeUrl(addon?.baseUrl) === preferredAddonUrl
+          )
+        : null;
+      if (preferredAddon) {
+        const preferredType = preferredMetaRequestType(
+          preferredAddon,
+          requestedType,
+          inferredType,
+          id
+        );
+        if (preferredType) {
+          addCandidate(preferredAddon, preferredType);
+        }
+      }
 
       // Prefer addons whose explicit idPrefixes identify them as the owner.
       // This also safely recovers `tv` when a secondary catalog forwarded a
@@ -154,6 +215,59 @@ class MetaRepository {
     } finally {
       this.inFlightMetaAll.delete(cacheKey);
     }
+  }
+
+  async getMetaFromAllAddonsForIds(type, ids = []) {
+    const identityIds = Array.from(
+      new Set(
+        (Array.isArray(ids) ? ids : [ids]).map((id) => String(id || "").trim()).filter(Boolean)
+      )
+    );
+    if (!identityIds.length) {
+      return { status: "error", message: "No metadata identity provided", code: 404 };
+    }
+
+    const preferredAddonUrl = addonRepository.canonicalizeUrl(
+      LayoutPreferences.get().preferredMetadataAddonBaseUrl
+    );
+    if (preferredAddonUrl) {
+      const addons = await addonRepository.getInstalledAddons();
+      const preferredAddon = addons.find(
+        (addon) => addonRepository.canonicalizeUrl(addon?.baseUrl) === preferredAddonUrl
+      );
+      if (preferredAddon) {
+        const preferredResults = await Promise.all(
+          identityIds.map(async (id) => {
+            const inferredType = this.inferCanonicalType(type, id);
+            const requestType = preferredMetaRequestType(
+              preferredAddon,
+              String(type || "").trim(),
+              inferredType,
+              id
+            );
+            return requestType ? this.getMeta(preferredAddon.baseUrl, requestType, id) : null;
+          })
+        );
+        const preferredResult = preferredResults.find(
+          (result) => result?.status === "success" && result?.data
+        );
+        if (preferredResult) {
+          return preferredResult;
+        }
+      }
+    }
+
+    const results = await Promise.all(
+      identityIds.map((id) =>
+        this.getMetaFromAllAddons(type, id, {
+          skipPreferredAddon: Boolean(preferredAddonUrl)
+        })
+      )
+    );
+    return (
+      results.find((result) => result?.status === "success" && result?.data) ||
+      results[0] || { status: "error", message: "Meta not found", code: 404 }
+    );
   }
 
   invalidateDetailCache(id) {

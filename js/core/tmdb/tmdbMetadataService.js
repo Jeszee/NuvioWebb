@@ -57,9 +57,12 @@ function normalizeTmdbArtworkLanguage(language = "") {
   };
 }
 
-function buildTmdbImageLanguageFilter(language = "") {
+function buildTmdbImageLanguageFilter(language = "", originalLanguage = "") {
   const { locale, languageCode } = normalizeTmdbArtworkLanguage(language);
-  return [...new Set([languageCode, locale, "en", "null"])].join(",");
+  const originalCode = String(originalLanguage || "")
+    .trim()
+    .toLowerCase();
+  return [...new Set([languageCode, locale, "en", originalCode, "null"].filter(Boolean))].join(",");
 }
 
 /**
@@ -90,7 +93,7 @@ export function selectTextlessImagePath(images = []) {
   return ranked[0].image.file_path;
 }
 
-function selectBestLocalizedLogoPath(logos = [], language = "") {
+function selectBestLocalizedLogoPath(logos = [], language = "", originalLanguage = "") {
   const { languageCode, regionCode } = normalizeTmdbArtworkLanguage(language);
   const ranked = (Array.isArray(logos) ? logos : [])
     .map((logo, index) => {
@@ -105,8 +108,10 @@ function selectBestLocalizedLogoPath(logos = [], language = "") {
         priority = 3;
       } else if (logoLanguage === "en") {
         priority = 2;
-      } else if (!logoLanguage) {
+      } else if (logoLanguage === String(originalLanguage || "").toLowerCase()) {
         priority = 1;
+      } else if (!logoLanguage) {
+        priority = 0;
       }
       return {
         logo,
@@ -124,6 +129,84 @@ function selectBestLocalizedLogoPath(logos = [], language = "") {
         left.index - right.index
     );
   return ranked[0]?.logo?.file_path || null;
+}
+
+export function selectBestLocalizedPosterPath(posters = [], language = "", originalLanguage = "") {
+  const { languageCode, regionCode } = normalizeTmdbArtworkLanguage(language);
+  const ranked = (Array.isArray(posters) ? posters : [])
+    .map((poster, index) => {
+      const posterLanguage = String(poster?.iso_639_1 || "").toLowerCase();
+      const posterRegion = String(poster?.iso_3166_1 || "").toUpperCase();
+      let priority = -1;
+      if (posterLanguage === languageCode && regionCode && posterRegion === regionCode) {
+        priority = 5;
+      } else if (posterLanguage === languageCode && !posterRegion) {
+        priority = 4;
+      } else if (posterLanguage === languageCode) {
+        priority = 3;
+      } else if (posterLanguage === "en") {
+        priority = 2;
+      } else if (posterLanguage === String(originalLanguage || "").toLowerCase()) {
+        priority = 0;
+      } else if (!posterLanguage) {
+        priority = 1;
+      }
+      return {
+        poster,
+        index,
+        priority,
+        voteAverage: Number(poster?.vote_average || 0),
+        width: Number(poster?.width || 0)
+      };
+    })
+    .filter((entry) => entry.priority >= 0 && entry.poster?.file_path)
+    .sort(
+      (left, right) =>
+        right.priority - left.priority ||
+        right.voteAverage - left.voteAverage ||
+        right.width - left.width ||
+        left.index - right.index
+    );
+  return ranked[0]?.poster?.file_path || null;
+}
+
+function translationForLanguage(translations = [], language = "") {
+  const { languageCode, regionCode } = normalizeTmdbArtworkLanguage(language);
+  const matching = (Array.isArray(translations) ? translations : []).filter(
+    (translation) => String(translation?.iso_639_1 || "").toLowerCase() === languageCode
+  );
+  return (
+    matching.find(
+      (translation) =>
+        regionCode && String(translation?.iso_3166_1 || "").toUpperCase() === regionCode
+    ) ||
+    matching.find((translation) => !String(translation?.iso_3166_1 || "").trim()) ||
+    matching[0] ||
+    null
+  );
+}
+
+function localizedTranslationValue(data = {}, field = "", language = "", originalLanguage = "") {
+  const translations = data?.translations?.translations;
+  const fallbackLanguages = [language, "en-US", originalLanguage].filter(Boolean);
+  for (const fallbackLanguage of [...new Set(fallbackLanguages)]) {
+    const translation = translationForLanguage(translations, fallbackLanguage);
+    const value = String(translation?.data?.[field] || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function localizedEpisodeField(preferred, english, original) {
+  const preferredValue = String(preferred || "").trim();
+  const englishValue = String(english || "").trim();
+  const originalValue = String(original || "").trim();
+  if (preferredValue && preferredValue !== originalValue) {
+    return preferredValue;
+  }
+  return englishValue || preferredValue || originalValue || "";
 }
 
 function normalizeTmdbTrailerLanguage(language = "") {
@@ -261,7 +344,7 @@ export const TmdbMetadataService = {
     const type = resolveType(contentType);
     const lang = normalizeTmdbLanguageCode(language || settings.language);
     const imageLanguages = buildTmdbImageLanguageFilter(lang);
-    const params = `api_key=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(lang)}&append_to_response=images,credits,release_dates,content_ratings,videos,external_ids&include_image_language=${encodeURIComponent(imageLanguages)}`;
+    const params = `api_key=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(lang)}&append_to_response=images,credits,release_dates,content_ratings,videos,external_ids,translations&include_image_language=${encodeURIComponent(imageLanguages)}`;
     const url = `${TMDB_BASE_URL}/${type}/${encodeURIComponent(String(tmdbId))}?${params}`;
 
     const response = await fetch(url);
@@ -270,7 +353,36 @@ export const TmdbMetadataService = {
     }
 
     const data = await response.json();
-    const logoPath = selectBestLocalizedLogoPath(data?.images?.logos, lang);
+    const originalLanguage = String(data?.original_language || "").toLowerCase();
+    const titleField = type === "tv" ? "name" : "title";
+    const localizedTitle =
+      localizedTranslationValue(data, titleField, lang, originalLanguage) ||
+      data.title ||
+      data.name ||
+      null;
+    const localizedDescription =
+      localizedTranslationValue(data, "overview", lang, originalLanguage) || data.overview || null;
+    let images = data?.images || {};
+    if (
+      originalLanguage &&
+      (!selectBestLocalizedPosterPath(images.posters, lang, originalLanguage) ||
+        !selectBestLocalizedLogoPath(images.logos, lang, originalLanguage))
+    ) {
+      const imageParams = `api_key=${encodeURIComponent(apiKey)}&include_image_language=${encodeURIComponent(buildTmdbImageLanguageFilter(lang, originalLanguage))}`;
+      const imageResponse = await fetch(
+        `${TMDB_BASE_URL}/${type}/${encodeURIComponent(String(tmdbId))}/images?${imageParams}`
+      );
+      if (imageResponse.ok) {
+        const imageData = await imageResponse.json();
+        images = {
+          ...images,
+          posters: [...(images.posters || []), ...(imageData?.posters || [])],
+          logos: [...(images.logos || []), ...(imageData?.logos || [])],
+          backdrops: [...(images.backdrops || []), ...(imageData?.backdrops || [])]
+        };
+      }
+    }
+    const logoPath = selectBestLocalizedLogoPath(images.logos, lang, originalLanguage);
     const releaseYear =
       type === "tv"
         ? String(data.first_air_date || "").slice(0, 4)
@@ -301,16 +413,23 @@ export const TmdbMetadataService = {
     const trailers = mapTrailerCandidates(trailerCandidates);
 
     return {
-      localizedTitle: data.title || data.name || null,
-      description: data.overview || null,
-      backdrop: toImageUrl(data.backdrop_path, "backdrop"),
-      poster: toImageUrl(data.poster_path, "poster"),
+      localizedTitle,
+      description: localizedDescription,
+      backdrop: toImageUrl(
+        selectBestLocalizedPosterPath(images.backdrops, lang, originalLanguage) ||
+          data.backdrop_path,
+        "backdrop"
+      ),
+      poster: toImageUrl(
+        selectBestLocalizedPosterPath(images.posters, lang, originalLanguage),
+        "poster"
+      ),
       // The plates, kept beside the ordinary artwork rather than replacing it:
       // a hero that fills the screen wants no title printed across it, while a
       // card in a row still wants the poster the addon chose. Either can be
       // absent -- plenty of titles have no textless image at all.
-      textlessBackdrop: toImageUrl(selectTextlessImagePath(data?.images?.backdrops), "backdrop"),
-      textlessPoster: toImageUrl(selectTextlessImagePath(data?.images?.posters), "posterHero"),
+      textlessBackdrop: toImageUrl(selectTextlessImagePath(images.backdrops), "backdrop"),
+      textlessPoster: toImageUrl(selectTextlessImagePath(images.posters), "posterHero"),
       logo: toImageUrl(logoPath, "logo"),
       genres: Array.isArray(data.genres)
         ? data.genres.map((genre) => genre.name).filter(Boolean)
@@ -325,6 +444,7 @@ export const TmdbMetadataService = {
       language: spokenLanguage?.iso_639_1 || spokenLanguage?.english_name || null,
       originalLanguage: data?.original_language || null,
       imdbId: data?.external_ids?.imdb_id || null,
+      tvdbId: data?.external_ids?.tvdb_id || null,
       credits: data.credits || null,
       companies,
       productionCompanies: companies,
@@ -360,7 +480,12 @@ export const TmdbMetadataService = {
       .filter((item) => item.episode > 0);
   },
 
-  async fetchEpisodeEnrichment({ tmdbId, seasonNumbers = [], language = null } = {}) {
+  async fetchEpisodeEnrichment({
+    tmdbId,
+    seasonNumbers = [],
+    language = null,
+    originalLanguage = ""
+  } = {}) {
     const settings = TmdbSettingsStore.get();
     const apiKey = getEffectiveTmdbApiKey();
     if (!settings.enabled || !settings.useEpisodes || !apiKey || !tmdbId) {
@@ -379,24 +504,66 @@ export const TmdbMetadataService = {
       return new Map();
     }
 
+    const fallbackLanguages = [
+      lang,
+      "en-US",
+      String(originalLanguage || "")
+        .trim()
+        .toLowerCase()
+    ].filter((value, index, values) => value && values.indexOf(value) === index);
     const entries = await Promise.all(
       seasons.map(async (seasonNumber) => {
-        const url = `${TMDB_BASE_URL}/tv/${encodeURIComponent(String(tmdbId))}/season/${encodeURIComponent(String(seasonNumber))}?api_key=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(lang)}`;
-        const response = await fetch(url);
-        if (!response.ok) {
-          return [];
-        }
-        const data = await response.json();
-        return (Array.isArray(data?.episodes) ? data.episodes : [])
-          .map((episode) => ({
-            key: `${seasonNumber}:${Number(episode?.episode_number || 0)}`,
-            title: episode?.name || "",
-            overview: episode?.overview || "",
-            airDate: episode?.air_date || "",
-            thumbnail: toImageUrl(episode?.still_path || null, "still"),
-            runtime: Number(episode?.runtime || 0) || null
-          }))
-          .filter((episode) => !episode.key.endsWith(":0"));
+        const languageResults = await Promise.all(
+          fallbackLanguages.map(async (fallbackLanguage) => {
+            const url = `${TMDB_BASE_URL}/tv/${encodeURIComponent(String(tmdbId))}/season/${encodeURIComponent(String(seasonNumber))}?api_key=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(fallbackLanguage)}`;
+            const response = await fetch(url);
+            if (!response.ok) {
+              return new Map();
+            }
+            const data = await response.json();
+            return new Map(
+              (Array.isArray(data?.episodes) ? data.episodes : [])
+                .map((episode) => [
+                  Number(episode?.episode_number || 0),
+                  {
+                    title: episode?.name || "",
+                    overview: episode?.overview || "",
+                    airDate: episode?.air_date || "",
+                    thumbnail: toImageUrl(episode?.still_path || null, "still"),
+                    runtime: Number(episode?.runtime || 0) || null
+                  }
+                ])
+                .filter(([episodeNumber]) => episodeNumber > 0)
+            );
+          })
+        );
+        const [
+          preferredEpisodes = new Map(),
+          englishEpisodes = new Map(),
+          originalEpisodes = new Map()
+        ] = languageResults;
+        const episodeNumbers = new Set([
+          ...preferredEpisodes.keys(),
+          ...englishEpisodes.keys(),
+          ...originalEpisodes.keys()
+        ]);
+        return Array.from(episodeNumbers, (episodeNumber) => {
+          const preferred = preferredEpisodes.get(episodeNumber) || {};
+          const english = englishEpisodes.get(episodeNumber) || {};
+          const original = originalEpisodes.get(episodeNumber) || {};
+          return {
+            key: `${seasonNumber}:${episodeNumber}`,
+            title: localizedEpisodeField(preferred.title, english.title, original.title),
+            overview: localizedEpisodeField(
+              preferred.overview,
+              english.overview,
+              original.overview
+            ),
+            airDate: preferred.airDate || english.airDate || original.airDate || "",
+            thumbnail: preferred.thumbnail || english.thumbnail || original.thumbnail || null,
+            runtime: preferred.runtime || english.runtime || original.runtime || null
+          };
+        });
       })
     );
 
@@ -405,6 +572,44 @@ export const TmdbMetadataService = {
       map.set(episode.key, episode);
     });
     return map;
+  },
+
+  async fetchEpisodeRatings({ tmdbId, seasonNumbers = [] } = {}) {
+    const settings = TmdbSettingsStore.get();
+    const apiKey = getEffectiveTmdbApiKey();
+    if (!settings.enabled || !apiKey || !tmdbId) {
+      return {};
+    }
+
+    const seasons = [
+      ...new Set(
+        (Array.isArray(seasonNumbers) ? seasonNumbers : [])
+          .map(Number)
+          .filter((season) => Number.isInteger(season) && season > 0)
+      )
+    ];
+    const results = await Promise.all(
+      seasons.map(async (seasonNumber) => {
+        const url = `${TMDB_BASE_URL}/tv/${encodeURIComponent(String(tmdbId))}/season/${encodeURIComponent(String(seasonNumber))}?api_key=${encodeURIComponent(apiKey)}&language=en-US`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          return [seasonNumber, []];
+        }
+        const data = await response.json();
+        const ratings = (Array.isArray(data?.episodes) ? data.episodes : [])
+          .map((episode) => ({
+            episode: Number(episode?.episode_number || 0),
+            rating:
+              typeof episode?.vote_average === "number"
+                ? Number(episode.vote_average.toFixed(1))
+                : null,
+            source: "tmdb"
+          }))
+          .filter((entry) => entry.episode > 0 && entry.rating > 0);
+        return [seasonNumber, ratings];
+      })
+    );
+    return Object.fromEntries(results);
   },
 
   async fetchMovieCollection({ collectionId, language = null } = {}) {

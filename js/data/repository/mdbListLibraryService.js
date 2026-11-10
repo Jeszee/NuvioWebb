@@ -204,6 +204,20 @@ function normalizeMembership(changes = {}) {
   return changes && typeof changes === "object" ? changes : {};
 }
 
+function normalizePrivacy(privacy) {
+  const value = String(privacy || "private").toLowerCase();
+  if (value !== "private" && value !== "public") {
+    throw new Error("MDBList lists support only private or public visibility");
+  }
+  return value;
+}
+
+function personalListId(listId) {
+  const match = /^(?:list:)?([1-9]\d*)$/.exec(String(listId ?? "").trim());
+  if (!match) throw new Error("MDBList personal list was not found");
+  return match[1];
+}
+
 function listQuery() {
   return {
     limit: 1000,
@@ -392,6 +406,61 @@ export const MdbListLibraryService = {
       }
     }
     cache = null;
+  },
+
+  async refreshNow() {
+    const items = await this.refresh();
+    return Array.isArray(items);
+  },
+
+  async createPersonalList(name, description, privacy) {
+    const listName = String(name || "").trim();
+    if (!listName || String(description || "").trim()) {
+      throw new Error("MDBList lists require a name and do not support descriptions");
+    }
+    const { response, payload } = await MdbListAuthService.apiRequest("/lists/user/add", {
+      method: "POST",
+      body: { name: listName, private: normalizePrivacy(privacy) === "private" }
+    });
+    const id = numberOrNull(payload?.id);
+    if (!response.ok || !(id > 0)) throw new Error("Could not create MDBList list");
+    cache = null;
+    return `list:${id}`;
+  },
+
+  async updatePersonalList(listId, name, description, privacy) {
+    const listName = String(name || "").trim();
+    if (!listName || String(description || "").trim()) {
+      throw new Error("MDBList lists require a name and do not support descriptions");
+    }
+    const { response } = await MdbListAuthService.apiRequest(`/lists/${personalListId(listId)}`, {
+      method: "PUT",
+      body: { name: listName, private: normalizePrivacy(privacy) === "private" }
+    });
+    if (!response.ok) throw new Error("Could not update MDBList list");
+    cache = null;
+  },
+
+  async deletePersonalList(listId) {
+    const { response } = await MdbListAuthService.apiRequest(`/lists/${personalListId(listId)}`, {
+      method: "DELETE"
+    });
+    if (!response.ok) throw new Error("Could not delete MDBList list");
+    cache = null;
+  },
+
+  // MDBList has no list-ordering endpoint, so the order only applies to the cached tabs.
+  async reorderPersonalLists(orderedKeys = []) {
+    if (!cache) return;
+    const rank = new Map(orderedKeys.map((key, index) => [String(key), index]));
+    const personal = cache.tabs
+      .filter((tab) => tab.type === "personal")
+      .sort((a, b) => (rank.get(a.key) ?? Infinity) - (rank.get(b.key) ?? Infinity));
+    let index = 0;
+    cache = {
+      ...cache,
+      tabs: cache.tabs.map((tab) => (tab.type === "personal" ? personal[index++] : tab))
+    };
   },
 
   parseWatchlist: parseMdbListWatchlist,

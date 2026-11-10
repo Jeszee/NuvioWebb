@@ -12,6 +12,9 @@ function normalizeState(value = {}) {
     accessToken: String(value.accessToken || value.access_token || "") || null,
     username: String(value.username || "") || null,
     accountId: value.accountId == null ? null : Number(value.accountId),
+    authorizationRevoked: value.authorizationRevoked === true,
+    deviceCode: String(value.deviceCode || value.device_code || "") || null,
+    deviceClientId: String(value.deviceClientId || value.clientId || "") || null,
     userCode: String(value.userCode || value.user_code || "") || null,
     verificationUrl:
       String(value.verificationUrl || value.verification_uri || value.verification_url || "") ||
@@ -54,20 +57,23 @@ export const SimklAuthStore = {
   },
 
   isAuthenticated(profileId = activeProfileId()) {
-    return Boolean(readProfileState(profileId).accessToken);
+    const state = readProfileState(profileId);
+    return Boolean(state.accessToken && !state.authorizationRevoked);
   },
 
-  savePinSession(data = {}, profileId = activeProfileId()) {
+  saveDeviceSession(data = {}, profileId = activeProfileId()) {
     const current = readProfileState(profileId);
     const expiresIn = Math.max(0, Number(data.expires_in || data.expiresIn || 0) || 0);
     return writeProfileState(profileId, {
       ...current,
+      deviceCode: data.device_code || data.deviceCode || null,
+      deviceClientId: data.clientId || data.deviceClientId || null,
       userCode: data.user_code || data.userCode || null,
       verificationUrl:
-        data.verification_uri ||
         data.verification_url ||
+        data.verification_uri ||
         data.verificationUrl ||
-        "https://simkl.com/pin",
+        "https://simkl.com/activate",
       expiresAt: Date.now() + expiresIn * 1000,
       pollInterval: data.interval || data.pollInterval || 5
     });
@@ -78,6 +84,9 @@ export const SimklAuthStore = {
     return writeProfileState(profileId, {
       ...current,
       accessToken,
+      authorizationRevoked: false,
+      deviceCode: null,
+      deviceClientId: null,
       userCode: null,
       verificationUrl: null,
       expiresAt: null,
@@ -90,10 +99,12 @@ export const SimklAuthStore = {
     return writeProfileState(profileId, { ...current, username, accountId });
   },
 
-  clearPinSession(profileId = activeProfileId()) {
+  clearDeviceSession(profileId = activeProfileId()) {
     const current = readProfileState(profileId);
     return writeProfileState(profileId, {
       ...current,
+      deviceCode: null,
+      deviceClientId: null,
       userCode: null,
       verificationUrl: null,
       expiresAt: null,
@@ -101,7 +112,24 @@ export const SimklAuthStore = {
     });
   },
 
+  setPollInterval(interval, profileId = activeProfileId()) {
+    const current = readProfileState(profileId);
+    return writeProfileState(profileId, {
+      ...current,
+      pollInterval: Math.max(1, Number(interval) || current.pollInterval)
+    });
+  },
+
   clearAuth(profileId = activeProfileId()) {
-    return writeProfileState(profileId, {});
+    return writeProfileState(profileId, { authorizationRevoked: true });
+  },
+
+  markAuthorizationRevoked(profileId = activeProfileId()) {
+    const current = readProfileState(profileId);
+    return writeProfileState(profileId, {
+      ...current,
+      accessToken: null,
+      authorizationRevoked: true
+    });
   }
 };

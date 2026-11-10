@@ -14,6 +14,7 @@ export const LICENSES_ATTRIBUTION_SECTIONS = [
       ["tmdb", "https://www.themoviedb.org"],
       ["trakt", "https://trakt.tv"],
       ["simkl", "https://simkl.com"],
+      ["tvdb", "https://thetvdb.com"],
       ["premiumize", "https://www.premiumize.me"],
       ["torbox", "https://torbox.app"],
       ["mdblist", "https://mdblist.com"],

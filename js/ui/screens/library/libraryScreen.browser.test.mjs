@@ -151,3 +151,30 @@ test("the library list re-reads when Back uncovers it", async () => {
   // message, and neither belongs to walking back into a screen.
   assert.doesNotMatch(source, /onRouteRevealed\(\) \{[\s\S]*?refreshNow\(/);
 });
+
+test("Simkl Saved shows only the Simkl status lists, not generic library filters", async () => {
+  const { LibraryScreen } = await loadLibraryScreen();
+  const markup = LibraryScreen.renderPickerGroups.call(
+    {
+      isDownloadManagerView: () => false,
+      isDownloadedView: () => false,
+      renderPicker: (picker) => `<${picker}>`,
+      renderLibrarySearchButton: () => "<search>",
+      controller: {
+        getSelectedListLabel: () => "Completed",
+        getPickerOptions: (picker) => (picker === "list" ? ["watching", "completed"] : [])
+      }
+    },
+    {
+      sourceMode: "simkl",
+      viewMode: "saved"
+    }
+  );
+
+  assert.match(markup, /<list>/);
+  assert.match(markup, /<search>/);
+  assert.doesNotMatch(
+    markup,
+    /<type>|<sort>|<genre>|<year>|PresentationToggle|library-filter-toggle/
+  );
+});

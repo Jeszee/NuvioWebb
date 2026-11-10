@@ -70,6 +70,36 @@ test("an anime with no IMDb id still matches through SIMKL's alias set", () => {
   assert.equal(deduplicateContinueWatchingItems(items).length, 1);
 });
 
+test("duplicate aliases are carried forward so transitive SIMKL IDs stay one card", () => {
+  const items = [
+    partial({
+      contentType: "series",
+      contentId: "tvdb:81189",
+      source: "simkl_local",
+      updatedAt: 3000
+    }),
+    partial({
+      contentType: "series",
+      contentId: "mal:1234",
+      ids: { tvdb: "81189", anilist: "9988", imdb: "tt0903747" },
+      source: "simkl_history",
+      updatedAt: 2000
+    }),
+    partial({
+      contentType: "series",
+      contentId: "anilist:9988",
+      source: "simkl_history",
+      updatedAt: 1000
+    })
+  ];
+
+  const result = deduplicateContinueWatchingItems(items);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].contentId, "tvdb:81189", "newest progress state wins");
+  assert.equal(result[0].ids.imdb, "tt0903747");
+  assert.equal(result[0].ids.anilist, "9988");
+});
+
 test("genuinely different titles are never merged", () => {
   const items = [
     partial({ contentId: "tt1130884", updatedAt: 3000 }),

@@ -878,6 +878,9 @@ class LibraryRepository {
   }
 
   async createPersonalList(name, description, privacy) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.createPersonalList(name, description, privacy);
+    }
     const { payload } = await authorizedTraktRequest("/users/me/lists", {
       method: "POST",
       body: {
@@ -899,6 +902,9 @@ class LibraryRepository {
   }
 
   async updatePersonalList(listId, name, description, privacy) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.updatePersonalList(listId, name, description, privacy);
+    }
     const { payload } = await authorizedTraktRequest(
       `/users/me/lists/${encodeURIComponent(String(listId))}`,
       {
@@ -932,6 +938,9 @@ class LibraryRepository {
   }
 
   async deletePersonalList(listId) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.deletePersonalList(listId);
+    }
     await authorizedTraktRequest(`/users/me/lists/${encodeURIComponent(String(listId))}`, {
       method: "DELETE",
       errorMessage: "Could not delete Trakt list"
@@ -951,6 +960,9 @@ class LibraryRepository {
   }
 
   async reorderPersonalLists(orderedListIds = []) {
+    if ((await this.getSourceMode()) === LibrarySourceMode.MDBLIST) {
+      return MdbListLibraryService.reorderPersonalLists(orderedListIds);
+    }
     const rank = orderedListIds
       .map((id) => Number(String(id).replace(PERSONAL_KEY_PREFIX, "")))
       .filter((id) => Number.isFinite(id) && id > 0);

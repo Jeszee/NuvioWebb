@@ -26,6 +26,7 @@ test("missing optional public integration values are empty and do not block runt
   assert.equal(env.SIMKL_CLIENT_ID, "");
   assert.equal(env.TRAKT_CLIENT_ID, "");
   assert.equal(env.SIMKL_APP_NAME, "nuvio");
+  assert.equal(env.TV_LOGIN_WEB_BASE_URL, "https://nuvio.tv/tv-login");
 });
 
 test("container runtime allowlist includes Premiumize but excludes Trakt server configuration", async () => {
@@ -37,6 +38,7 @@ test("container runtime allowlist includes Premiumize but excludes Trakt server 
   assert.match(entrypoint, /write_value PREMIUMIZE_CLIENT_ID/);
   assert.match(entrypoint, /write_value SIMKL_CLIENT_ID/);
   assert.match(entrypoint, /write_value TRAKT_CLIENT_ID/);
+  assert.match(entrypoint, /write_value TV_LOGIN_WEB_BASE_URL/);
   assert.doesNotMatch(entrypoint, /write_value TRAKT_CLIENT_SECRET|write_value TRAKT_REDIRECT_URI/);
 });
 

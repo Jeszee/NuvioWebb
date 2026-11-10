@@ -26,6 +26,76 @@ It provides a client-side playback interface with support for the Stremio addon 
 
 NuvioWeb is based on the original Nuvio project and preserves credit and attribution to its upstream maintainers and main repository.
 
+## Fork capabilities
+
+This repository is a community fork of
+[alphasquare404/NuvioWeb](https://github.com/alphasquare404/NuvioWeb). The
+initial fork already provided the browser/PWA client, Stremio addon discovery
+and playback, responsive layouts, offline-capable PWA behavior, local saved
+library support, and the original provider integration surfaces.
+
+Compared with that initial fork snapshot, this repository now adds and
+strengthens the following functionality:
+
+### Library sources and synchronization
+
+- **Local library:** save and remove titles locally, with the shared library
+  action system.
+- **MDBList:** connect with the PIN/OAuth flow, validate the account, import the
+  watchlist and personal lists, refresh changes made on the MDBList website,
+  add and remove movies or shows, and manage list membership.
+- **Simkl:** connect and reconnect accounts, import library statuses, cache
+  activity timestamps, check activities before downloading changes, fetch
+  incremental updates, throttle refreshes, and remove titles with a
+  confirmation when watched history or ratings are affected.
+- **Trakt:** use the shared library abstraction for watchlists and lists while
+  preserving provider-specific list management.
+- **TVDB metadata:** optionally configure a profile-scoped TVDB API key/PIN
+  for series and episode metadata. TVDB is used as a field-aware fallback
+  behind existing catalog/add-on data and TMDB; it does not replace Simkl,
+  Trakt, or Nuvio watch-progress ownership.
+
+### Consistent title actions
+
+The same title actions are available from the detail screen, Home posters,
+library posters, and the shared Search/Discover/Collection poster surfaces:
+
+- open details;
+- add a title to the active library source;
+- remove a title from the active library source;
+- manage provider lists or statuses where applicable;
+- mark a movie or series watched/unwatched.
+
+Provider IDs are carried from catalog and library cards into the mutation
+request. This is important for services such as MDBList, which cannot reliably
+change a list from only a display title or an addon-specific item ID.
+
+### Reliability and deployment improvements
+
+- Browser provider calls use same-origin proxy routes where provider CORS
+  behavior prevents direct browser requests.
+- Provider requests have explicit timeout, connection-error, request-spacing,
+  and rate-limit handling.
+- Runtime configuration keeps server-only credentials out of the browser
+  bundle.
+- Metadata resolution supports provider identity candidates, preferred
+  metadata add-ons, TMDB language fallback, textless artwork fallback, and
+  optional TVDB enrichment for missing series/episode fields.
+- Continue Watching and Up Next use stronger identity matching, duplicate
+  suppression, progress-source handling, and enrichment invalidation so
+  refreshed metadata does not create duplicate cards or stale progress.
+- Profile settings and provider credentials can be synchronized through the
+  existing profile sync services, including TVDB credentials.
+- Home and detail views include improved title localization, metadata
+  presentation, and layout preferences.
+- Docker and local development proxy configuration are included for the
+  provider integrations.
+- Regression tests cover the provider sync flows, library mutations, account
+  lifecycle, and pointer/touch/keyboard poster actions.
+
+See [CHANGELOG.md](CHANGELOG.md) for the chronological implementation history
+and [environment configuration](docs/environment.md) for deployment settings.
+
 ## Development
 
 ### Prerequisites

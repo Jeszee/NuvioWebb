@@ -90,6 +90,9 @@ const PROXY_RULES = [
   { method: "GET", pattern: /^\/lists\/user$/ },
   { method: "GET", pattern: /^\/lists\/\d+\/items$/ },
   { method: "POST", pattern: /^\/lists\/\d+\/items\/(?:add|remove)$/ },
+  { method: "POST", pattern: /^\/lists\/user\/add$/ },
+  { method: "PUT", pattern: /^\/lists\/\d+$/ },
+  { method: "DELETE", pattern: /^\/lists\/\d+$/ },
   { method: "GET", pattern: /^\/sync\/(?:last_activities|playback|watched|journal)$/ },
   { method: "POST", pattern: /^\/sync\/watched(?:\/remove)?$/ },
   { method: "POST", pattern: /^\/scrobble\/(?:start|pause|stop|clear)$/ }
@@ -212,13 +215,16 @@ export function createMdbListBridgeHandler({ environment = process.env, fetchImp
 
     const proxyPrefix = "/api/mdblist/api";
     const proxyRequest = pathname.startsWith(proxyPrefix);
-    if (request.method !== "POST" && !(proxyRequest && request.method === "GET")) {
+    if (
+      request.method !== "POST" &&
+      !(proxyRequest && ["GET", "PUT", "DELETE"].includes(request.method))
+    ) {
       json(response, 405, { error: "Method not allowed" });
       return;
     }
 
     let body = {};
-    if (request.method === "POST") {
+    if (request.method === "POST" || request.method === "PUT") {
       try {
         body = await readJsonBody(request);
       } catch (error) {
@@ -315,7 +321,8 @@ export function createMdbListBridgeHandler({ environment = process.env, fetchImp
 
     const target = new URL(upstreamPath.slice(1), config.apiBaseUrl);
     target.search = parsed.search;
-    const payload = request.method === "GET" ? undefined : JSON.stringify(body);
+    const payload =
+      request.method === "GET" || request.method === "DELETE" ? undefined : JSON.stringify(body);
     const result = await requestUpstream(fetchImpl, target.href, {
       method: request.method,
       headers: upstreamHeaders(accessToken, payload),
@@ -328,6 +335,10 @@ export function createMdbListBridgeHandler({ environment = process.env, fetchImp
     if (result.status < 200 || result.status >= 300) {
       const failure = upstreamFailure(result);
       json(response, failure.status, failure.body, failure.headers);
+      return;
+    }
+    if (result.status === 204) {
+      json(response, 200, { success: true });
       return;
     }
     json(response, result.status, result.payload);

@@ -29,12 +29,25 @@ import { TmdbService } from "../../../core/tmdb/tmdbService.js";
 import { capTmdbImageSize } from "../../../core/media/tmdbImageSize.js";
 import { readHeroArtwork, rememberHeroArtwork } from "../../../data/local/heroArtworkCache.js";
 import { TmdbMetadataService } from "../../../core/tmdb/tmdbMetadataService.js";
+import {
+  getEffectiveTvdbCredentials,
+  TvdbSettingsStore
+} from "../../../data/local/tvdbSettingsStore.js";
+import {
+  MetadataEnrichmentService,
+  mergeEpisodeEnrichment
+} from "../../../core/tvdb/metadataEnrichmentService.js";
+import {
+  resolveTvdbEpisodeId,
+  resolveTvdbSeriesId
+} from "../../../core/tvdb/tvdbMetadataService.js";
 import { isTmdbArtworkEnabled } from "../../../core/tmdb/tmdbArtworkGate.js";
 import {
   getEffectiveTmdbApiKey,
   TmdbSettingsStore
 } from "../../../data/local/tmdbSettingsStore.js";
 import { metaRepository } from "../../../data/repository/metaRepository.js";
+import { metadataIdentityCandidatesForItem } from "../../../data/repository/metadataIdentityCandidates.js";
 import { mdbListRepository } from "../../../data/repository/mdbListRepository.js";
 import { ProfileManager } from "../../../core/profile/profileManager.js";
 import { StartupSyncService } from "../../../core/profile/startupSyncService.js";
@@ -142,6 +155,8 @@ import {
   HOME_ROW_TIMEOUT_MS
 } from "./homeConstants.js";
 import { resolveNextUpCandidates } from "./nextUpCandidateResolver.js";
+import { deduplicateNextUpProgressCandidates } from "./nextUpProgressCandidates.js";
+import { containsJapaneseScript, localizedCatalogTitle } from "./catalogTitleLocalization.js";
 import { shouldRefreshContinueWatchingForChange } from "./continueWatchingRefreshPolicy.js";
 import { onContinueWatchingStale } from "./continueWatchingStaleSignal.js";
 import {
@@ -1755,7 +1770,10 @@ function continueWatchingEnrichmentCacheKey(item = {}) {
 function continueWatchingEnrichmentSignature() {
   return continueWatchingEnrichmentSignatureFor(
     TmdbSettingsStore.get(),
-    Boolean(getEffectiveTmdbApiKey())
+    Boolean(getEffectiveTmdbApiKey()),
+    LayoutPreferences.get().preferredMetadataAddonBaseUrl,
+    TvdbSettingsStore.get(),
+    Boolean(getEffectiveTvdbCredentials().apiKey)
   );
 }
 
@@ -2163,6 +2181,7 @@ function renderHeroMarkup(layoutMode, heroItem, heroCandidates) {
           <div class="home-hero-chip-row${display.chips.length ? "" : " is-empty"}">${display.chips.map((chip) => `<span class="home-hero-chip">${escapeHtml(chip)}</span>`).join("")}</div>
           <div class="home-hero-meta-secondary${display.metaSecondary.length ? "" : " is-empty"}">${renderMetaTokens(display.metaSecondary)}</div>
           <p class="home-hero-description"><span class="home-hero-description-text">${escapeHtml(display.description)}</span></p>
+          ${heroItem?.tvdbMetadataSource ? '<a class="home-hero-tvdb-attribution" href="https://thetvdb.com" target="_blank" rel="noopener noreferrer" data-tvdb-attribution>Metadata by TheTVDB</a>' : ""}
         </div>
         <div class="home-hero-indicators">${buildHeroIndicators(heroCandidates, heroItem)}</div>
       </article>
@@ -2271,6 +2290,11 @@ function renderContinueWatchingCard(item, index, options = {}) {
               ? browserTextActions
                 ? `<button class="home-continue-subtitle home-continue-text-action" type="button" data-cw-text-action="episode" aria-label="${escapeAttribute(`Open ${normalized.title} episode details`)}">${escapeHtml(subtitle)}</button>`
                 : `<div class="home-continue-subtitle">${escapeHtml(subtitle)}</div>`
+              : ""
+          }
+          ${
+            normalized.tvdbMetadataSource
+              ? '<a class="home-continue-tvdb-attribution" href="https://thetvdb.com" target="_blank" rel="noopener noreferrer" data-tvdb-attribution>Metadata by TheTVDB</a>'
               : ""
           }
         </div>
@@ -2742,6 +2766,9 @@ export function createPosterCardMarkup(
              data-item-id="${escapeAttribute(normalized.id)}"
              data-item-type="${escapeAttribute(normalized.type || itemType || "movie")}"
              data-item-title="${escapeAttribute(normalized.name || "Untitled")}"
+             data-imdb-id="${escapeAttribute(normalized.ids?.imdb || normalized.imdbId || normalized.imdb_id || "")}"
+             data-tmdb-id="${escapeAttribute(normalized.ids?.tmdb || normalized.tmdbId || normalized.tmdb_id || "")}"
+             data-trakt-id="${escapeAttribute(normalized.ids?.trakt || normalized.traktId || normalized.trakt_id || "")}"
              data-poster-src="${escapeAttribute(posterSrc || "")}"
              data-backdrop-src="${escapeAttribute(backdropSrc || "")}"
              data-logo-src="${escapeAttribute(normalized.logo || "")}"
@@ -4371,6 +4398,19 @@ export const HomeScreen = {
       this.bindHomeHeroDescriptionToggle(heroNode);
       this.bindHomeHeroTitleToggle(heroNode);
     }
+    let tvdbAttribution = heroNode.querySelector(".home-hero-tvdb-attribution");
+    if (hero?.tvdbMetadataSource && !tvdbAttribution && descriptionNode) {
+      tvdbAttribution = document.createElement("a");
+      tvdbAttribution.className = "home-hero-tvdb-attribution";
+      tvdbAttribution.href = "https://thetvdb.com";
+      tvdbAttribution.target = "_blank";
+      tvdbAttribution.rel = "noopener noreferrer";
+      tvdbAttribution.dataset.tvdbAttribution = "";
+      tvdbAttribution.textContent = "Metadata by TheTVDB";
+      descriptionNode.insertAdjacentElement("afterend", tvdbAttribution);
+    } else if (!hero?.tvdbMetadataSource) {
+      tvdbAttribution?.remove();
+    }
     this.scheduleHomeTruncationUpdate({ scope: heroNode });
     this.syncCollectionHeroMedia(hero);
 
@@ -5170,10 +5210,26 @@ export const HomeScreen = {
     if (this.resolveCollectionFolderTargetFromNode(node)) {
       return null;
     }
+    const rowIndex = Number(node.dataset.rowIndex);
+    const itemIndex = Number(node.dataset.itemIndex);
+    const rowItem =
+      Number.isInteger(rowIndex) && Number.isInteger(itemIndex) && rowIndex >= 0 && itemIndex >= 0
+        ? this.rows?.[rowIndex]?.result?.data?.items?.[itemIndex]
+        : null;
     return normalizeCatalogItem(
       {
+        ...(rowItem || {}),
         id: node.dataset.itemId || "",
         type: node.dataset.itemType || "movie",
+        ids: {
+          ...(rowItem?.ids || {}),
+          ...(node.dataset.imdbId ? { imdb: node.dataset.imdbId } : {}),
+          ...(node.dataset.tmdbId ? { tmdb: Number(node.dataset.tmdbId) } : {}),
+          ...(node.dataset.traktId ? { trakt: Number(node.dataset.traktId) } : {})
+        },
+        imdbId: node.dataset.imdbId || null,
+        tmdbId: node.dataset.tmdbId ? Number(node.dataset.tmdbId) : null,
+        traktId: node.dataset.traktId ? Number(node.dataset.traktId) : null,
         name: node.dataset.itemTitle || "Untitled",
         poster: node.dataset.posterSrc || null,
         background: node.dataset.backdropSrc || null,
@@ -5493,6 +5549,8 @@ export const HomeScreen = {
         normalized.type || (isSeriesTypeForContinueWatching(normalized?.type) ? "series" : "movie"),
       imdbId: normalized.imdbId || null,
       tmdbId: normalized.tmdbId || null,
+      tvdbId: normalized.ids?.tvdb || null,
+      ids: normalized.ids || null,
       traktId: normalized.traktId || null,
       fallbackTitle: normalized.title || normalized.contentId || "Untitled",
       autoOpenContinueWatching: true,
@@ -5533,6 +5591,8 @@ export const HomeScreen = {
           itemType: normalized.type || "movie",
           imdbId: normalized.imdbId || null,
           tmdbId: normalized.tmdbId || null,
+          tvdbId: normalized.ids?.tvdb || null,
+          ids: normalized.ids || null,
           traktId: normalized.traktId || null,
           fallbackTitle: normalized.title || normalized.contentId || "Untitled",
           fromContinueWatching: true,
@@ -8609,6 +8669,11 @@ export const HomeScreen = {
     }
     if (!this.boundHomeClickHandler) {
       this.boundHomeClickHandler = (event) => {
+        const attributionLink = event?.target?.closest?.("[data-tvdb-attribution]");
+        if (attributionLink && this.container?.contains(attributionLink)) {
+          event.stopPropagation();
+          return;
+        }
         const textAction = event?.target?.closest?.("[data-cw-text-action]");
         if (textAction && this.container?.contains(textAction)) {
           const card = textAction.closest(".home-continue-card");
@@ -8947,15 +9012,17 @@ export const HomeScreen = {
     const itemId = String(item?.id || "").trim();
     const itemType = String(item?.type || item?.apiType || "movie").trim() || "movie";
     if (!itemId) return null;
+    const metadataIds = metadataIdentityCandidatesForItem(item);
     const mdbImdbRatingPromise = withTimeout(
       mdbListRepository.getImdbRatingForItem(itemId, itemType),
       3500,
       null
     ).catch(() => null);
-    const result = await withTimeout(metaRepository.getMetaFromAllAddons(itemType, itemId), 4000, {
-      status: "error",
-      message: "timeout"
-    }).catch(() => ({ status: "error" }));
+    const result = await withTimeout(
+      metaRepository.getMetaFromAllAddonsForIds(itemType, metadataIds),
+      4000,
+      { status: "error", message: "timeout" }
+    ).catch(() => ({ status: "error" }));
     if (result?.status !== "success" || !result.data) return null;
     const meta = normalizeCatalogItem(
       { ...result.data, id: itemId, type: result.data.type || itemType },
@@ -11154,6 +11221,7 @@ export const HomeScreen = {
           return;
         }
       }
+      this.enrichVisibleCatalogTitles(row);
       images.forEach((image) => {
         if (!(image instanceof HTMLImageElement) || !image.isConnected) {
           return;
@@ -11182,6 +11250,84 @@ export const HomeScreen = {
         image.src = src;
       });
     });
+  },
+
+  enrichVisibleCatalogTitles(row) {
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    if (!this.catalogTitleEnrichmentAsked) {
+      this.catalogTitleEnrichmentAsked = new Set();
+    }
+    row
+      .querySelectorAll(".home-poster-card.focusable[data-action='openDetail']")
+      .forEach((node) => {
+        const item = this.getPosterItemFromNode(node);
+        if (!item?.id || !containsJapaneseScript(item.name)) {
+          return;
+        }
+        const itemType = String(item.type || item.apiType || "movie").trim() || "movie";
+        const key = `${itemType}:${item.id}`;
+        if (this.catalogTitleEnrichmentAsked.has(key)) {
+          return;
+        }
+        this.catalogTitleEnrichmentAsked.add(key);
+        const ids = metadataIdentityCandidatesForItem(item);
+        if (!ids.length) {
+          return;
+        }
+        void withTimeout(metaRepository.getMetaFromAllAddonsForIds(itemType, ids), 4000, {
+          status: "error"
+        })
+          .then((result) => {
+            const title = localizedCatalogTitle(item.name, result?.data?.name);
+            if (!title) {
+              return;
+            }
+            const matchingNodes = Array.from(
+              this.container?.querySelectorAll(".home-poster-card.focusable[data-item-id]") || []
+            ).filter(
+              (card) =>
+                String(card.dataset.itemId || "") === item.id &&
+                String(card.dataset.itemType || "movie") === itemType
+            );
+            matchingNodes.forEach((card) => {
+              card.dataset.itemTitle = title;
+              card
+                .querySelectorAll(".home-poster-title, .home-poster-expanded-title")
+                .forEach((titleNode) => {
+                  titleNode.textContent = title;
+                });
+              const poster = card.querySelector(".content-poster");
+              if (poster instanceof HTMLImageElement) {
+                poster.alt = title;
+              }
+            });
+            this.rows = (this.rows || []).map((catalogRow) => {
+              const items = catalogRow?.result?.data?.items;
+              if (!Array.isArray(items)) {
+                return catalogRow;
+              }
+              const nextItems = items.map((catalogItem) =>
+                String(catalogItem?.id || "") === item.id &&
+                String(catalogItem?.type || catalogItem?.apiType || catalogRow?.type || "movie") ===
+                  itemType
+                  ? { ...catalogItem, name: title }
+                  : catalogItem
+              );
+              return {
+                ...catalogRow,
+                result: {
+                  ...catalogRow.result,
+                  data: { ...(catalogRow.result?.data || {}), items: nextItems }
+                }
+              };
+            });
+          })
+          .catch((error) => {
+            console.warn("Catalog title localization failed", error);
+          });
+      });
   },
 
   teardownGridStickyHeader() {
@@ -11233,18 +11379,11 @@ export const HomeScreen = {
     const applyDaysCap = options?.applyDaysCap !== false;
     const cutoffMs = applyDaysCap ? Date.now() - CW_DAYS_CAP * 24 * 60 * 60 * 1000 : 0;
     const nextUpFromFurthestEpisode = options?.nextUpFromFurthestEpisode !== false;
-    const inProgressSeriesIds = new Set(
-      (Array.isArray(inProgressItems) ? inProgressItems : [])
-        .filter((item) => isSeriesTypeForContinueWatching(item?.contentType || item?.type))
-        .map((item) => String(item?.contentId || "").trim())
-        .filter(Boolean)
+    const inProgressSeriesItems = (Array.isArray(inProgressItems) ? inProgressItems : []).filter(
+      (item) => isSeriesTypeForContinueWatching(item?.contentType || item?.type)
     );
 
-    const latestCompletedByContent = new Map();
     const shouldReplaceNextUpSeed = (existing, incoming) => {
-      if (!existing) {
-        return true;
-      }
       const existingEpisodeKey = episodeSortKey(existing.season, existing.episode);
       const incomingEpisodeKey = episodeSortKey(incoming.season, incoming.episode);
       if (nextUpFromFurthestEpisode && incomingEpisodeKey !== existingEpisodeKey) {
@@ -11262,7 +11401,7 @@ export const HomeScreen = {
         return;
       }
       const contentId = String(entry?.contentId || "").trim();
-      if (!contentId || inProgressSeriesIds.has(contentId)) {
+      if (!contentId) {
         return;
       }
       if (!isSeriesTypeForContinueWatching(entry?.contentType)) {
@@ -11274,12 +11413,10 @@ export const HomeScreen = {
         return;
       }
 
-      const existing = latestCompletedByContent.get(contentId);
-      if (shouldReplaceNextUpSeed(existing, entry)) {
-        latestCompletedByContent.set(contentId, entry);
-      }
+      nextUpSeedCandidates.push(entry);
     };
 
+    const nextUpSeedCandidates = [];
     if (includeProgressSeeds) {
       (Array.isArray(allProgress) ? allProgress : []).forEach(addSeed);
     }
@@ -11290,9 +11427,11 @@ export const HomeScreen = {
         .forEach(addSeed);
     }
 
-    return Array.from(latestCompletedByContent.values()).sort(
-      (left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0)
-    );
+    return deduplicateNextUpProgressCandidates(
+      nextUpSeedCandidates,
+      inProgressSeriesItems,
+      shouldReplaceNextUpSeed
+    ).sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0));
   },
 
   // Continue Watching must reason only about the selected source's watched
@@ -11352,7 +11491,8 @@ export const HomeScreen = {
     contentType,
     contentId,
     timeoutMs = CW_META_TIMEOUT_MS,
-    alternateContentIds = []
+    alternateContentIds = [],
+    progressItem = {}
   ) {
     const effectiveTimeoutMs = getContinueWatchingMetaTimeout(timeoutMs);
     const normalizedType = String(contentType || "")
@@ -11368,20 +11508,12 @@ export const HomeScreen = {
       typeCandidates.push("movie");
     }
 
-    const rawContentId = String(contentId || "").trim();
-    const idCandidates = [];
-    [
-      ...(Array.isArray(alternateContentIds) ? alternateContentIds : [alternateContentIds]),
-      rawContentId
-    ]
-      .map((candidate) => String(candidate || "").trim())
-      .filter(Boolean)
-      .forEach((candidate) => {
-        idCandidates.push(candidate);
-        if (candidate.includes(":")) {
-          idCandidates.push(candidate.split(":").pop());
-        }
-      });
+    const idCandidates = metadataIdentityCandidatesForItem(
+      { ...progressItem, contentId: String(contentId || "").trim() },
+      alternateContentIds
+    ).flatMap((candidate) =>
+      candidate.includes(":") ? [candidate, candidate.split(":").pop()] : [candidate]
+    );
 
     const seenTypes = new Set();
     const requests = [];
@@ -11393,21 +11525,13 @@ export const HomeScreen = {
         continue;
       }
       seenTypes.add(normalizedCandidate);
-      const seenIds = new Set();
-      for (const candidateId of idCandidates) {
-        const normalizedId = String(candidateId || "").trim();
-        if (!normalizedId || seenIds.has(normalizedId)) {
-          continue;
-        }
-        seenIds.add(normalizedId);
-        requests.push(
-          withTimeout(
-            metaRepository.getMetaFromAllAddons(normalizedCandidate, normalizedId),
-            effectiveTimeoutMs,
-            { status: "error", message: "timeout" }
-          ).catch(() => ({ status: "error" }))
-        );
-      }
+      requests.push(
+        withTimeout(
+          metaRepository.getMetaFromAllAddonsForIds(normalizedCandidate, idCandidates),
+          effectiveTimeoutMs,
+          { status: "error", message: "timeout" }
+        ).catch(() => ({ status: "error" }))
+      );
     }
 
     const results = await Promise.all(requests);
@@ -11552,7 +11676,8 @@ export const HomeScreen = {
             contentType,
             contentId,
             CW_NEXT_UP_META_TIMEOUT_MS,
-            [progressEntry?.imdbId]
+            [progressEntry?.imdbId],
+            progressEntry
           );
         } catch (error) {
           console.warn("Next up meta lookup failed", error);
@@ -11562,6 +11687,7 @@ export const HomeScreen = {
           return null;
         }
         meta = await this.enrichContinueWatchingMetaWithTmdb(meta, {
+          ...progressEntry,
           contentId,
           contentType,
           season: progressEntry?.season,
@@ -11784,34 +11910,34 @@ export const HomeScreen = {
 
   async enrichContinueWatchingMetaWithTmdb(meta = {}, item = {}) {
     const settings = TmdbSettingsStore.get();
-    if (
-      !settings.enabled ||
-      !settings.enrichContinueWatching ||
-      !getEffectiveTmdbApiKey() ||
-      !meta
-    ) {
+    const tvdbSettings = TvdbSettingsStore.get();
+    const tmdbEnabled =
+      settings.enabled && settings.enrichContinueWatching && Boolean(getEffectiveTmdbApiKey());
+    const tvdbEnabled = tvdbSettings.enabled && Boolean(getEffectiveTvdbCredentials().apiKey);
+    if ((!tmdbEnabled && !tvdbEnabled) || !meta) {
       return meta;
     }
     const contentType = item.contentType || meta.type || "movie";
+    const preferredMetadataAddonConfigured = Boolean(
+      String(LayoutPreferences.get().preferredMetadataAddonBaseUrl || "").trim()
+    );
     try {
-      const explicitTmdbId = Number(item.tmdbId || 0);
+      const explicitTmdbId = Number(item.tmdbId || item.ids?.tmdb || 0);
       const tmdbLookupId =
         explicitTmdbId > 0
           ? `tmdb:${explicitTmdbId}`
-          : firstNonEmpty(item.imdbId, item.contentId, meta.id);
-      const tmdbId = await withTimeout(
-        TmdbService.ensureTmdbId(tmdbLookupId, contentType),
-        1800,
-        null
-      );
-      if (!tmdbId) {
-        return meta;
-      }
+          : firstNonEmpty(item.imdbId, item.ids?.imdb, item.contentId, meta.id);
+      const tmdbId = tmdbEnabled
+        ? await withTimeout(TmdbService.ensureTmdbId(tmdbLookupId, contentType), 1800, null)
+        : null;
+      const tvdbId = resolveTvdbSeriesId(item) || resolveTvdbSeriesId(meta);
       const enrichment = await withTimeout(
-        TmdbMetadataService.fetchEnrichment({
+        MetadataEnrichmentService.fetchEnrichment({
           tmdbId,
+          tvdbId,
           contentType,
-          language: settings.language
+          language: settings.language,
+          existingMetadata: meta
         }),
         2200,
         null
@@ -11820,20 +11946,30 @@ export const HomeScreen = {
         return meta;
       }
       const isSeries = isSeriesTypeForContinueWatching(contentType);
-      const episodeMap =
-        settings.useEpisodes && isSeries && item.season != null && Number(item.season) >= 0
+      const episodeResults =
+        isSeries && ((settings.useEpisodes && tmdbEnabled) || tvdbEnabled)
           ? await withTimeout(
-              TmdbMetadataService.fetchEpisodeEnrichment({
+              MetadataEnrichmentService.fetchEpisodeEnrichment({
                 tmdbId,
-                seasonNumbers: [Number(item.season)],
-                language: settings.language
+                seasonNumbers:
+                  item.season != null && Number(item.season) >= 0 ? [Number(item.season)] : [],
+                tvdbEpisodeIds: (Array.isArray(meta.videos) ? meta.videos : [])
+                  .map(resolveTvdbEpisodeId)
+                  .filter(Boolean),
+                episodeMetadata: (Array.isArray(meta.videos) ? meta.videos : []).map((video) => ({
+                  ...video,
+                  tvdbId: resolveTvdbEpisodeId(video)
+                })),
+                language: settings.language,
+                originalLanguage: enrichment.originalLanguage
               }),
               1800,
-              new Map()
+              { tmdbEpisodes: new Map(), tvdbEpisodes: new Map() }
             )
-          : new Map();
+          : { tmdbEpisodes: new Map(), tvdbEpisodes: new Map() };
       const videos =
-        episodeMap.size && Array.isArray(meta.videos)
+        (episodeResults.tmdbEpisodes.size || episodeResults.tvdbEpisodes.size) &&
+        Array.isArray(meta.videos)
           ? meta.videos.map((video) => {
               const key =
                 (video?.season != null || video?.seasonNumber != null) &&
@@ -11843,56 +11979,119 @@ export const HomeScreen = {
                       video.episode ?? video.episodeNumber
                     )}`
                   : "";
-              const episode = key ? episodeMap.get(key) : null;
-              if (!episode) {
+              const tvdbEpisodeId = resolveTvdbEpisodeId(video);
+              const tvdbEpisode =
+                (tvdbEpisodeId && episodeResults.tvdbEpisodes.get(`tvdb:${tvdbEpisodeId}`)) || null;
+              const tmdbEpisode = (key && episodeResults.tmdbEpisodes.get(key)) || null;
+              if (!tvdbEpisode && !tmdbEpisode) {
                 return video;
               }
-              return {
-                ...video,
-                title: episode.title || video.title,
-                overview: episode.overview || video.overview,
-                released: settings.useReleaseDates
-                  ? episode.airDate || video.released
-                  : video.released,
-                thumbnail: episode.thumbnail || video.thumbnail,
-                runtime: episode.runtime || video.runtime
-              };
+              return mergeEpisodeEnrichment(video, {
+                tvdbEpisode,
+                tmdbEpisode,
+                useReleaseDates: settings.useReleaseDates
+              });
             })
           : meta.videos;
-      const currentEpisode = episodeMap.get(
+      const currentEpisode = episodeResults.tmdbEpisodes.get(
         `${Number(item.season || 0)}:${Number(item.episode || 0)}`
       );
+      const preserveExistingMetadata = preferredMetadataAddonConfigured || tvdbEnabled;
       return {
         ...meta,
-        name: settings.useBasicInfo ? enrichment.localizedTitle || meta.name : meta.name,
+        name: settings.useBasicInfo
+          ? preserveExistingMetadata
+            ? meta.name || enrichment.localizedTitle
+            : enrichment.localizedTitle || meta.name
+          : meta.name,
         description: settings.useBasicInfo
-          ? enrichment.description || meta.description
+          ? preserveExistingMetadata
+            ? meta.description || enrichment.description
+            : enrichment.description || meta.description
           : meta.description,
-        background: settings.useArtwork ? enrichment.backdrop || meta.background : meta.background,
-        backdrop: settings.useArtwork ? enrichment.backdrop || meta.backdrop : meta.backdrop,
-        poster: settings.useArtwork ? enrichment.poster || meta.poster : meta.poster,
-        thumbnail: settings.useArtwork ? enrichment.poster || meta.thumbnail : meta.thumbnail,
-        logo: settings.useArtwork ? enrichment.logo || meta.logo : meta.logo,
-        genres:
-          settings.useBasicInfo && enrichment.genres?.length ? enrichment.genres : meta.genres,
+        background: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.background || enrichment.backdrop
+            : enrichment.backdrop || meta.background
+          : meta.background,
+        backdrop: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.backdrop || enrichment.backdrop
+            : enrichment.backdrop || meta.backdrop
+          : meta.backdrop,
+        poster: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.poster || enrichment.poster
+            : enrichment.poster || meta.poster
+          : meta.poster,
+        thumbnail: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.thumbnail || enrichment.poster
+            : enrichment.poster || meta.thumbnail
+          : meta.thumbnail,
+        logo: settings.useArtwork
+          ? preserveExistingMetadata
+            ? meta.logo || enrichment.logo
+            : enrichment.logo || meta.logo
+          : meta.logo,
+        genres: settings.useBasicInfo
+          ? preserveExistingMetadata
+            ? meta.genres?.length
+              ? meta.genres
+              : enrichment.genres
+            : enrichment.genres?.length
+              ? enrichment.genres
+              : meta.genres
+          : meta.genres,
         releaseInfo: settings.useReleaseDates
-          ? enrichment.releaseInfo || meta.releaseInfo
+          ? preserveExistingMetadata
+            ? meta.releaseInfo || enrichment.releaseInfo
+            : enrichment.releaseInfo || meta.releaseInfo
           : meta.releaseInfo,
-        released: settings.useReleaseDates ? enrichment.released || meta.released : meta.released,
-        runtime: settings.useDetails ? enrichment.runtime || meta.runtime : meta.runtime,
-        country: settings.useDetails ? enrichment.country || meta.country : meta.country,
-        language: settings.useDetails ? enrichment.language || meta.language : meta.language,
-        ageRating: settings.useDetails ? enrichment.ageRating || meta.ageRating : meta.ageRating,
-        status: settings.useDetails ? enrichment.status || meta.status : meta.status,
+        released: settings.useReleaseDates
+          ? preserveExistingMetadata
+            ? meta.released || enrichment.released
+            : enrichment.released || meta.released
+          : meta.released,
+        runtime: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.runtime || enrichment.runtime
+            : enrichment.runtime || meta.runtime
+          : meta.runtime,
+        country: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.country || enrichment.country
+            : enrichment.country || meta.country
+          : meta.country,
+        language: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.language || enrichment.language
+            : enrichment.language || meta.language
+          : meta.language,
+        ageRating: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.ageRating || enrichment.ageRating
+            : enrichment.ageRating || meta.ageRating
+          : meta.ageRating,
+        status: settings.useDetails
+          ? preserveExistingMetadata
+            ? meta.status || enrichment.status
+            : enrichment.status || meta.status
+          : meta.status,
         tmdbRating:
           settings.useBasicInfo && typeof enrichment.rating === "number"
             ? Number(enrichment.rating.toFixed(1))
             : meta.tmdbRating,
+        tvdbScore: enrichment.tvdbScore ?? meta.tvdbScore ?? null,
+        tvdbId: enrichment.tvdbId || meta.tvdbId || null,
+        tvdbMetadataSource: Boolean(enrichment.attributionUrl || meta.tvdbMetadataSource),
         episodeThumbnail: settings.useArtwork
-          ? currentEpisode?.thumbnail || meta.episodeThumbnail
+          ? preferredMetadataAddonConfigured
+            ? meta.episodeThumbnail || currentEpisode?.thumbnail
+            : currentEpisode?.thumbnail || meta.episodeThumbnail
           : meta.episodeThumbnail,
         episodeTitle: settings.useEpisodes
-          ? currentEpisode?.title || meta.episodeTitle
+          ? meta.episodeTitle || currentEpisode?.title
           : meta.episodeTitle,
         episodeDescription: settings.useEpisodes
           ? currentEpisode?.overview || meta.episodeDescription
@@ -11938,7 +12137,8 @@ export const HomeScreen = {
                 item.contentType || "movie",
                 item.contentId,
                 options?.metaTimeoutMs || 1800,
-                [item.imdbId]
+                [item.imdbId],
+                item
               ));
             if (!meta) {
               meta = {
@@ -12002,9 +12202,9 @@ export const HomeScreen = {
                 language: firstNonEmpty(enrichedMeta.language),
                 country: firstNonEmpty(enrichedMeta.country),
                 episodeTitle: firstNonEmpty(
+                  item.episodeTitle,
                   enrichedMeta.episodeTitle,
                   episodeEntry?.title,
-                  item.episodeTitle,
                   item.subtitle
                 ),
                 episodeDescription: firstNonEmpty(
@@ -12175,23 +12375,27 @@ export const HomeScreen = {
     const settings = TmdbSettingsStore.get();
     const tmdbEnabledForCurrentLayout =
       settings.enabled && (this.layoutMode !== "modern" || settings.modernHomeEnabled);
-    if (!tmdbEnabledForCurrentLayout || !getEffectiveTmdbApiKey()) {
+    const tvdbEnabled =
+      TvdbSettingsStore.get().enabled && Boolean(getEffectiveTvdbCredentials().apiKey);
+    if ((!tmdbEnabledForCurrentLayout || !getEffectiveTmdbApiKey()) && !tvdbEnabled) {
       this.heroItem = hero;
       return;
     }
 
     try {
-      const tmdbId = await withTimeout(TmdbService.ensureTmdbId(hero.id, hero.type), 2200, null);
-      if (!tmdbId) {
-        this.heroItem = hero;
-        return;
-      }
+      const tmdbId =
+        tmdbEnabledForCurrentLayout && getEffectiveTmdbApiKey()
+          ? await withTimeout(TmdbService.ensureTmdbId(hero.id, hero.type), 2200, null)
+          : null;
+      const tvdbId = resolveTvdbSeriesId(hero);
 
       const enriched = await withTimeout(
-        TmdbMetadataService.fetchEnrichment({
+        MetadataEnrichmentService.fetchEnrichment({
           tmdbId,
+          tvdbId,
           contentType: hero.type,
-          language: settings.language
+          language: settings.language,
+          existingMetadata: hero
         }),
         2400,
         null
@@ -12202,25 +12406,57 @@ export const HomeScreen = {
         return;
       }
 
+      const preservePreferredAddon = Boolean(
+        String(LayoutPreferences.get().preferredMetadataAddonBaseUrl || "").trim()
+      );
+      const preserveExistingMetadata = preservePreferredAddon || tvdbEnabled;
       this.heroItem = normalizeCatalogItem(
         {
           ...hero,
-          name: settings.useBasicInfo ? enriched.localizedTitle || hero.name : hero.name,
+          name: settings.useBasicInfo
+            ? preserveExistingMetadata
+              ? hero.name || enriched.localizedTitle
+              : enriched.localizedTitle || hero.name
+            : hero.name,
           description: settings.useBasicInfo
-            ? enriched.description || hero.description
+            ? preserveExistingMetadata
+              ? hero.description || enriched.description
+              : enriched.description || hero.description
             : hero.description,
-          background: settings.useArtwork ? enriched.backdrop || hero.background : hero.background,
-          poster: settings.useArtwork ? enriched.poster || hero.poster : hero.poster,
+          background: settings.useArtwork
+            ? preserveExistingMetadata
+              ? hero.background || enriched.backdrop
+              : enriched.backdrop || hero.background
+            : hero.background,
+          poster: settings.useArtwork
+            ? preserveExistingMetadata
+              ? hero.poster || enriched.poster
+              : enriched.poster || hero.poster
+            : hero.poster,
           // Carried, not substituted: the hero picks between these by its own
           // shape, and a phone held upright wants the poster plate where a
           // wide screen wants the backdrop one.
           textlessBackdrop: settings.useArtwork ? enriched.textlessBackdrop || null : null,
           textlessPoster: settings.useArtwork ? enriched.textlessPoster || null : null,
-          logo: settings.useArtwork ? enriched.logo : hero.logo,
-          genres: settings.useBasicInfo ? enriched.genres || hero.genres : hero.genres,
+          logo: settings.useArtwork
+            ? preserveExistingMetadata
+              ? hero.logo || enriched.logo
+              : enriched.logo || hero.logo
+            : hero.logo,
+          genres: settings.useBasicInfo
+            ? preserveExistingMetadata
+              ? hero.genres?.length
+                ? hero.genres
+                : enriched.genres
+              : enriched.genres || hero.genres
+            : hero.genres,
           releaseInfo: settings.useReleaseDates
-            ? enriched.releaseInfo || hero.releaseInfo
-            : hero.releaseInfo
+            ? preserveExistingMetadata
+              ? hero.releaseInfo || enriched.releaseInfo
+              : enriched.releaseInfo || hero.releaseInfo
+            : hero.releaseInfo,
+          tvdbId: enriched.tvdbId || hero.tvdbId || null,
+          tvdbMetadataSource: Boolean(enriched.attributionUrl || hero.tvdbMetadataSource)
         },
         hero.type || "movie"
       );

@@ -55,6 +55,7 @@ import { addonRepository } from "../../../data/repository/addonRepository.js";
 import { LocalStore } from "../../../core/storage/localStore.js";
 import { SessionStore } from "../../../core/storage/sessionStore.js";
 import { TmdbSettingsStore } from "../../../data/local/tmdbSettingsStore.js";
+import { TvdbSettingsStore } from "../../../data/local/tvdbSettingsStore.js";
 import { HomeCatalogStore } from "../../../data/local/homeCatalogStore.js";
 import { buildCatalogOrderKey } from "../../../core/addons/homeCatalogs.js";
 import { CollectionsStore, buildCollectionHomeKey } from "../../../data/local/collectionsStore.js";
@@ -150,6 +151,7 @@ import { MdbListAuthService } from "../../../data/repository/mdbListAuthService.
 import { MdbListSyncService } from "../../../data/repository/mdbListSyncService.js";
 import { MdbListLibraryService } from "../../../data/repository/mdbListLibraryService.js";
 import { mdbListRepository } from "../../../data/repository/mdbListRepository.js";
+import { TvdbMetadataService } from "../../../core/tvdb/tvdbMetadataService.js";
 import {
   getStreamBadgePreviewSections,
   normalizeStreamBadgeChipColor,
@@ -2947,6 +2949,7 @@ export const SettingsScreen = {
       homeCatalog: HomeCatalogStore.get(),
       tmdb: TmdbSettingsStore.get(),
       mdbList: MdbListSettingsStore.get(),
+      tvdb: TvdbSettingsStore.get(),
       animeSkip: AnimeSkipSettingsStore.get(),
       streamBadgeSettings: StreamBadgeSettingsStore.get(),
       debrid: DebridSettingsStore.get(),
@@ -4822,6 +4825,18 @@ export const SettingsScreen = {
     const isDesktopBrowser = isDesktopSettingsBrowser();
     this.ensureExpandedState("layout");
     const expanded = this.expandedSections.layout;
+    const preferredMetadataAddonBaseUrl = String(
+      model.layout.preferredMetadataAddonBaseUrl || ""
+    ).trim();
+    const preferredMetadataAddon = (model.addons || []).find(
+      (addon) =>
+        addonRepository.canonicalizeUrl(addon?.baseUrl) ===
+        addonRepository.canonicalizeUrl(preferredMetadataAddonBaseUrl)
+    );
+    const preferredMetadataAddonLabel = preferredMetadataAddonBaseUrl
+      ? preferredMetadataAddon?.displayName ||
+        t("settings.layout.preferredMetadataAddon.unavailable", {}, "Unavailable")
+      : t("settings.layout.preferredMetadataAddon.automatic", {}, "Automatic");
 
     this.actionMap.set("layout:toggle:homeLayout", () => {
       this.toggleExpandedSection("layout", "homeLayout");
@@ -4976,6 +4991,30 @@ export const SettingsScreen = {
         preferExternalMetaAddonDetail: !LayoutPreferences.get().preferExternalMetaAddonDetail
       })
     );
+    this.actionMap.set("layout:detail:preferredMetadataAddon", async () => {
+      const addons = await addonRepository.getInstalledAddons();
+      const metadataAddons = addons.filter((addon) =>
+        (addon?.resources || []).some(
+          (resource) => String(resource?.name || "").toLowerCase() === "meta"
+        )
+      );
+      this.openOptionDialog({
+        title: t("settings.layout.preferredMetadataAddon.title", {}, "Preferred Metadata Add-on"),
+        options: [
+          {
+            id: "",
+            label: t("settings.layout.preferredMetadataAddon.automatic", {}, "Automatic")
+          },
+          ...metadataAddons.map((addon) => ({
+            id: addon.baseUrl,
+            label: addon.displayName || addon.name || addon.baseUrl
+          }))
+        ],
+        selectedId: LayoutPreferences.get().preferredMetadataAddonBaseUrl || "",
+        returnFocusKey: "layout:detail:preferredMetadataAddon",
+        onSelect: (option) => LayoutPreferences.set({ preferredMetadataAddonBaseUrl: option.id })
+      });
+    });
     this.actionMap.set("layout:continueWatchingCardStyle", () =>
       this.openOptionDialog({
         title: t("layout_cw_card_style", {}, "Continue Watching card style"),
@@ -5569,6 +5608,16 @@ export const SettingsScreen = {
           subtitle: t("settings.layout.preferExternalMeta.subtitle"),
           checked: model.layout.preferExternalMetaAddonDetail !== false
         })}
+        ${this.renderActionRow({
+          focusKey: "layout:detail:preferredMetadataAddon",
+          title: t("settings.layout.preferredMetadataAddon.title", {}, "Preferred Metadata Add-on"),
+          subtitle: t(
+            "settings.layout.preferredMetadataAddon.subtitle",
+            {},
+            "Prioritize this add-on over catalog metadata; Automatic matches other installed add-ons."
+          ),
+          value: preferredMetadataAddonLabel
+        })}
         ${this.renderToggleRow({ focusKey: "layout:showFullReleaseDate", title: t("layout_show_full_release_date"), subtitle: t("layout_show_full_release_date_sub"), checked: model.layout.showFullReleaseDate !== false })}
       </div>
     `;
@@ -5915,6 +5964,10 @@ export const SettingsScreen = {
       this.integrationView = "mdblist";
       this.contentFocusKey = "integration:back";
     });
+    this.actionMap.set("integration:hub:tvdb", () => {
+      this.integrationView = "tvdb";
+      this.contentFocusKey = "integration:back";
+    });
     this.actionMap.set("integration:hub:animeskip", () => {
       this.integrationView = "animeskip";
       this.contentFocusKey = "integration:back";
@@ -5944,6 +5997,11 @@ export const SettingsScreen = {
               subtitle: t("settings.integration.mdblist.subtitle")
             })}
             ${this.renderActionRow({
+              focusKey: "integration:hub:tvdb",
+              title: t("settings.integration.tvdb.label"),
+              subtitle: t("settings.integration.tvdb.subtitle")
+            })}
+            ${this.renderActionRow({
               focusKey: "integration:hub:animeskip",
               title: t("settings.integration.animeskip.label"),
               subtitle: t("settings.integration.animeskip.subtitle")
@@ -5961,6 +6019,7 @@ export const SettingsScreen = {
         debrid: "integration:hub:debrid",
         tmdb: "integration:hub:tmdb",
         mdblist: "integration:hub:mdblist",
+        tvdb: "integration:hub:tvdb",
         animeskip: "integration:hub:animeskip"
       };
       this.contentFocusKey = focusByIntegration[key] || "integration:hub:tmdb";
@@ -6829,6 +6888,123 @@ export const SettingsScreen = {
                 })
               )
               .join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    if (key === "tvdb") {
+      this.actionMap.set("integration:tvdb:enabled", () => {
+        TvdbSettingsStore.set({ enabled: !TvdbSettingsStore.get().enabled });
+      });
+      this.actionMap.set("integration:tvdb:key", () => {
+        this.openTextDialog({
+          title: t("settings.integration.tvdb.apiKey.title"),
+          value: TvdbSettingsStore.get().apiKey || "",
+          placeholder: t("settings.integration.tvdb.apiKey.placeholder"),
+          sensitive: true,
+          returnFocusKey: "integration:tvdb:key",
+          clearLabel: t("common.clear", {}, t("action_clear", {}, "Clear")),
+          onClear: () => {
+            TvdbSettingsStore.set({ apiKey: "" });
+            return true;
+          },
+          onSubmit: async (value) => {
+            TvdbSettingsStore.set({ apiKey: String(value || "").trim() });
+            this.tvdbStatusMessage = "";
+            return true;
+          }
+        });
+      });
+      this.actionMap.set("integration:tvdb:pin", () => {
+        this.openTextDialog({
+          title: t("settings.integration.tvdb.pin.title"),
+          value: TvdbSettingsStore.get().pin || "",
+          placeholder: t("settings.integration.tvdb.pin.placeholder"),
+          sensitive: true,
+          returnFocusKey: "integration:tvdb:pin",
+          clearLabel: t("common.clear", {}, t("action_clear", {}, "Clear")),
+          onClear: () => {
+            TvdbSettingsStore.set({ pin: "" });
+            return true;
+          },
+          onSubmit: async (value) => {
+            TvdbSettingsStore.set({ pin: String(value || "").trim() });
+            this.tvdbStatusMessage = "";
+            return true;
+          }
+        });
+      });
+      this.actionMap.set("integration:tvdb:test", async () => {
+        this.tvdbStatusMessage = t(
+          "settings.integration.tvdb.testing",
+          {},
+          "Testing TVDB credentials..."
+        );
+        this.tvdbStatusKind = "info";
+        await this.render({ refreshModel: false });
+        try {
+          const settings = TvdbSettingsStore.get();
+          const valid = await TvdbMetadataService.validateCredentials(
+            settings.apiKey,
+            settings.pin
+          );
+          this.tvdbStatusMessage = valid
+            ? t("settings.integration.tvdb.connectionSuccess", {}, "TVDB connection successful.")
+            : t(
+                "settings.integration.tvdb.connectionFailed",
+                {},
+                "TVDB credentials were rejected."
+              );
+          this.tvdbStatusKind = valid ? "success" : "error";
+        } catch (error) {
+          this.tvdbStatusMessage =
+            error?.code === "tvdb_timeout"
+              ? t("settings.integration.tvdb.timeout", {}, "TVDB request timed out.")
+              : t("settings.integration.tvdb.connectionFailed", {}, "Could not connect to TVDB.");
+          this.tvdbStatusKind = "error";
+        }
+        await this.render({ refreshModel: false });
+      });
+
+      return `
+        ${this.renderSectionHeader({ labelKey: "settings.integration.tvdb.label", subtitleKey: "settings.integration.tvdb.subtitle" })}
+        <div class="settings-group-card settings-group-card-fill">
+          <div class="settings-stack">
+            ${this.renderActionRow({
+              focusKey: "integration:back",
+              title: t("settings.integration.backToIntegrations.title"),
+              subtitle: t("settings.integration.backToIntegrations.subtitle"),
+              icon: "back"
+            })}
+            ${this.renderToggleRow({
+              focusKey: "integration:tvdb:enabled",
+              title: t("settings.integration.tvdb.enable.title"),
+              subtitle: t("settings.integration.tvdb.enable.subtitle"),
+              checked: Boolean(model.tvdb.enabled)
+            })}
+            ${this.renderActionRow({
+              focusKey: "integration:tvdb:key",
+              title: t("settings.integration.tvdb.apiKey.title"),
+              subtitle: t("settings.integration.tvdb.apiKey.subtitle"),
+              value: maskValue(model.tvdb.apiKey, t("common.notSet")),
+              disabled: !model.tvdb.enabled
+            })}
+            ${this.renderActionRow({
+              focusKey: "integration:tvdb:pin",
+              title: t("settings.integration.tvdb.pin.title"),
+              subtitle: t("settings.integration.tvdb.pin.subtitle"),
+              value: maskValue(model.tvdb.pin, t("common.notSet")),
+              disabled: !model.tvdb.enabled
+            })}
+            ${this.renderActionRow({
+              focusKey: "integration:tvdb:test",
+              title: t("settings.integration.tvdb.test.title"),
+              subtitle: t("settings.integration.tvdb.test.subtitle"),
+              disabled: !model.tvdb.enabled || !model.tvdb.apiKey
+            })}
+            <p class="settings-integration-notice">${escapeHtml(t("settings.integration.tvdb.terms", {}, "Use a TVDB API key only for access permitted by your TVDB account or agreement. A subscriber PIN is optional. TVDB attribution is shown when its metadata is used."))} <a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer">TheTVDB.com</a></p>
+            ${this.tvdbStatusMessage ? `<p class="settings-integration-status is-${escapeHtml(this.tvdbStatusKind || "info")}">${escapeHtml(this.tvdbStatusMessage)}</p>` : ""}
           </div>
         </div>
       `;
@@ -9975,7 +10151,8 @@ export const SettingsScreen = {
         options: [
           { id: SimklAnimeIdPreference.IMDB, label: "IMDb / TMDB" },
           { id: SimklAnimeIdPreference.MAL, label: "MyAnimeList" },
-          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" }
+          { id: SimklAnimeIdPreference.KITSU, label: "Kitsu" },
+          { id: SimklAnimeIdPreference.TVDB, label: "TVDB" }
         ],
         selectedId: settings.simklAnimeIdPreference,
         returnFocusKey: "tracking:desktop:anime",
@@ -10064,7 +10241,7 @@ export const SettingsScreen = {
       ${traktConnected ? this.renderActionRow({ focusKey: "tracking:desktop:cw", title: "Continue Watching window", subtitle: "Trakt history considered for Continue Watching.", value: settings.continueWatchingDaysCap === 0 ? "All history" : `${settings.continueWatchingDaysCap} days` }) : ""}
       ${traktConnected ? this.renderToggleRow({ focusKey: "tracking:desktop:comments", title: "Trakt comments", subtitle: "Show Trakt reviews on metadata pages.", checked: Boolean(settings.showMetaComments) }) : ""}
       ${traktConnected ? this.renderActionRow({ focusKey: "tracking:desktop:related", title: "More Like This source", subtitle: "Choose related titles from Trakt or TMDB.", value: settings.moreLikeThisSource === MoreLikeThisSourcePreference.TMDB ? "TMDB" : "Trakt" }) : ""}
-      ${simklConnected ? this.renderActionRow({ focusKey: "tracking:desktop:anime", title: "Simkl anime ID", subtitle: "Preferred catalog identity for anime matching.", value: settings.simklAnimeIdPreference === SimklAnimeIdPreference.MAL ? "MyAnimeList" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.KITSU ? "Kitsu" : "IMDb / TMDB" }) : ""}
+      ${simklConnected ? this.renderActionRow({ focusKey: "tracking:desktop:anime", title: "Simkl anime ID", subtitle: "Preferred catalog identity for anime matching.", value: settings.simklAnimeIdPreference === SimklAnimeIdPreference.MAL ? "MyAnimeList" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.KITSU ? "Kitsu" : settings.simklAnimeIdPreference === SimklAnimeIdPreference.TVDB ? "TVDB" : "IMDb / TMDB" }) : ""}
     `;
 
     return `

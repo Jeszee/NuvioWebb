@@ -7728,6 +7728,197 @@ html.is-hero-stream-hold * {
   gap: 14px;
 }
 
+.desktop-browser .settings-shell .settings-provider-card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 28px;
+  background: linear-gradient(135deg, #1f1f1f 0%, #0f0f0f 100%);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.desktop-browser .settings-shell .settings-provider-card.is-trakt {
+  background: linear-gradient(120deg, #84239b 0%, #c91f5f 45%, #ee2024 100%);
+}
+
+.desktop-browser .settings-shell .settings-provider-card.is-simkl {
+  background: radial-gradient(120% 140% at 50% 0%, #2b2b2b 0%, #141414 60%, #0c0c0c 100%);
+}
+
+.desktop-browser .settings-shell .settings-provider-card.is-mdblist {
+  background: linear-gradient(135deg, #1b4a86 0%, #225fa3 50%, #173b6d 100%);
+}
+
+.desktop-browser .settings-shell .settings-provider-card:focus-within {
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+
+.desktop-browser .settings-shell .settings-provider-watermark {
+  position: absolute;
+  right: 56px;
+  bottom: -18px;
+  z-index: -1;
+  width: 132px;
+  height: 132px;
+  object-fit: contain;
+  opacity: 0.1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.desktop-browser .settings-shell .settings-provider-header {
+  position: relative;
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 20px 24px 18px;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.desktop-browser .settings-shell .settings-provider-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+}
+
+.desktop-browser .settings-shell .settings-provider-logo {
+  display: block;
+  height: 30px;
+  width: auto;
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.desktop-browser .settings-shell .settings-provider-logo.is-trakt {
+  height: 34px;
+}
+
+.desktop-browser .settings-shell .settings-provider-logo.is-simkl {
+  height: 24px;
+}
+
+.desktop-browser .settings-shell .settings-provider-logo.is-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+}
+
+.desktop-browser .settings-shell .settings-provider-name {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.desktop-browser .settings-shell .settings-provider-chevron {
+  width: 24px;
+  height: 24px;
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.desktop-browser .settings-shell .settings-provider-status {
+  grid-column: 1 / -1;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.desktop-browser .settings-shell .settings-provider-body {
+  display: grid;
+  gap: 16px;
+  padding: 0 24px 22px;
+}
+
+.desktop-browser .settings-shell .settings-provider-description {
+  max-width: 62ch;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.desktop-browser .settings-shell .settings-provider-actions {
+  display: grid;
+  gap: 14px;
+}
+
+.desktop-browser .settings-shell .settings-provider-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-primary {
+  min-height: 48px;
+  width: 100%;
+  color: #111;
+  font-size: 16px;
+  font-weight: 650;
+  background: #fff;
+  border: 1px solid #fff;
+  border-radius: 999px;
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-link {
+  min-height: 32px;
+  padding: 0 2px;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-link:focus-visible,
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-link.focused {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-primary:focus-visible,
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-primary.focused {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.45);
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-provider-status {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-error {
+  color: #ffd0cf;
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-activation-url,
+.desktop-browser .settings-shell .settings-provider-card .settings-row-subtitle {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.desktop-browser .settings-shell .settings-provider-card .settings-tracking-activation-code {
+  background: rgba(0, 0, 0, 0.28);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-primary:hover {
+    background: rgba(255, 255, 255, 0.9);
+  }
+
+  .desktop-browser .settings-shell .settings-provider-card .settings-tracking-inline-button.is-link:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
 .desktop-browser .settings-shell .settings-tracking-inline-actions {
   display: flex;
   flex-wrap: wrap;
